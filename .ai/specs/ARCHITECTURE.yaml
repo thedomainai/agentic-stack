@@ -1,0 +1,76 @@
+# Agentic Stack Architecture Specification
+
+version: 1.0
+
+components:
+  - name: AgentCore
+    type: ApplicationLogic
+    description: >
+      The central processing unit of the agent. Responsible for executing tasks,
+      making decisions, and interacting with other components.
+      (Implementation language TBD: e.g., Python, Go)
+
+  - name: Redis
+    type: InMemoryDataStore
+    purpose: StateManagementAndCaching
+    description: >
+      Handles the agent's real-time state, short-term memory, and caching.
+      It replaces the file-based `CURRENT_STATE.md`.
+    details:
+      - key: "agent:status"
+        dataType: Hash
+        description: "Stores the current operational status of the agent (e.g., idle, running_task, maintenance)."
+      - key: "agent:context:{task_id}"
+        dataType: String/JSON
+        description: "Short-term memory or context for a specific running task."
+
+  - name: RabbitMQ
+    type: MessageBroker
+    purpose: JobQueueSystem
+    description: >
+      Manages the queue of tasks for the agent, ensuring reliable, asynchronous execution.
+      It replaces the file-based `CURRENT_SPRINT.md`.
+    details:
+      - exchange: "agent.tasks"
+        type: "direct"
+        description: "The main exchange for routing task messages."
+      - queue: "tasks.default"
+        priority: "normal"
+        description: "Queue for standard operational tasks."
+      - queue: "tasks.high_priority"
+        priority: "high"
+        description: "Queue for urgent or critical tasks."
+
+  - name: StructuredDataStorage
+    type: FileSystem
+    purpose: LongTermMemoryAndConfiguration
+    description: >
+      Utilizes the local file system with structured data formats (YAML, JSONL)
+      for storing long-term knowledge, rules, and historical logs.
+    details:
+      - path: ".ai/rules/"
+        format: YAML
+        purpose: "Agent's operational rules and governance."
+      - path: ".ai/specs/"
+        format: YAML
+        purpose: "System and product specifications."
+      - path: ".ai/memory/"
+        format: JSONL
+        purpose: "Persistent, append-only memory logs (discoveries, failures)."
+      - path: ".ai/metrics/"
+        format: JSONL
+        purpose: "Performance and operational metrics."
+
+  - name: Vault
+    type: SecretManagement
+    purpose: SecureStorageOfSensitiveData
+    description: >
+      Provides a secure and centralized system for managing all secrets, such as API keys,
+      database credentials, and private certificates. Prevents secrets from being
+      hardcoded in the application or stored in version control.
+    details:
+      - path: "secret/data/agent/api_keys"
+        description: "Example path for storing API keys for external services."
+      - authentication:
+          development: "Token (using the predefined dev root token)"
+          production: "AppRole (recommended for automated workflows)"

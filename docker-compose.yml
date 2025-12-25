@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  redis:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: "rabbitmq:3-management-alpine"
+    ports:
+      - "5672:5672"   # AMQP port for application
+      - "15672:15672" # Management UI port
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq/
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  vault:
+    image: "vault:latest"
+    ports:
+      - "8200:8200"
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=dev-root-token
+    volumes:
+      - vault_data:/vault/file
+    cap_add:
+      - IPC_LOCK
+    command: "server -dev"
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  rabbitmq_data:
+  vault_data:

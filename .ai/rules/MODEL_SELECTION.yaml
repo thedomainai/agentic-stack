@@ -1,0 +1,251 @@
+# Agentic Stack Model Selection Rules
+# Defines LLM model selection criteria and routing logic
+
+version: 1.0
+
+# =============================================================================
+# Available Models
+# =============================================================================
+models:
+  primary:
+    provider: anthropic
+    model_id: claude-sonnet-4-20250514
+    description: "Primary model for most tasks - balanced performance and cost"
+    capabilities:
+      - reasoning
+      - code_generation
+      - analysis
+      - conversation
+    context_window: 200000
+    max_output_tokens: 16000
+    cost_per_1k_input: 0.003
+    cost_per_1k_output: 0.015
+
+  advanced:
+    provider: anthropic
+    model_id: claude-opus-4-20250514
+    description: "Advanced model for complex reasoning tasks"
+    capabilities:
+      - deep_reasoning
+      - complex_analysis
+      - architecture_design
+      - code_review
+    context_window: 200000
+    max_output_tokens: 16000
+    cost_per_1k_input: 0.015
+    cost_per_1k_output: 0.075
+
+  fast:
+    provider: anthropic
+    model_id: claude-3-5-haiku-20241022
+    description: "Fast model for simple tasks"
+    capabilities:
+      - simple_queries
+      - formatting
+      - classification
+      - extraction
+    context_window: 200000
+    max_output_tokens: 8000
+    cost_per_1k_input: 0.0008
+    cost_per_1k_output: 0.004
+
+# =============================================================================
+# Selection Rules
+# =============================================================================
+selection_rules:
+
+  # ---------------------------------------------------------------------------
+  # Task-based Selection
+  # ---------------------------------------------------------------------------
+  by_task_type:
+    description: "Model selection based on task characteristics"
+
+    rules:
+      - task_pattern: "architecture|design|review complex"
+        model: advanced
+        rationale: "Complex reasoning requires advanced capabilities"
+
+      - task_pattern: "implement|code|fix|refactor"
+        model: primary
+        rationale: "Standard coding tasks work well with primary model"
+
+      - task_pattern: "format|classify|extract|summarize simple"
+        model: fast
+        rationale: "Simple tasks can use faster, cheaper model"
+
+      - task_pattern: "research|analyze|investigate"
+        model: primary
+        rationale: "Research needs good reasoning at reasonable cost"
+
+      - task_pattern: "test|validate"
+        model: primary
+        rationale: "Testing requires reliable code understanding"
+
+      - task_pattern: "deploy|infrastructure"
+        model: primary
+        rationale: "Infrastructure tasks need reliable execution"
+
+  # ---------------------------------------------------------------------------
+  # Agent-based Defaults
+  # ---------------------------------------------------------------------------
+  by_agent:
+    description: "Default model per agent type"
+
+    defaults:
+      Orchestrator:
+        model: primary
+        allow_upgrade: true
+        upgrade_conditions:
+          - "task_complexity > 0.8"
+          - "previous_attempt_failed"
+
+      Architect:
+        model: advanced
+        allow_downgrade: false
+        rationale: "Architecture decisions need best reasoning"
+
+      Coder:
+        model: primary
+        allow_upgrade: true
+        upgrade_conditions:
+          - "file_count > 10"
+          - "involves_refactoring"
+
+      Researcher:
+        model: primary
+        allow_downgrade: true
+        downgrade_conditions:
+          - "simple_lookup_query"
+
+      Tester:
+        model: primary
+        allow_downgrade: true
+        downgrade_conditions:
+          - "test_execution_only"
+
+      Infra:
+        model: primary
+        allow_upgrade: true
+        upgrade_conditions:
+          - "production_deployment"
+
+  # ---------------------------------------------------------------------------
+  # Context-based Adjustments
+  # ---------------------------------------------------------------------------
+  by_context:
+    description: "Adjust selection based on runtime context"
+
+    rules:
+      - condition: "budget_remaining < 20%"
+        action: "prefer_fast_model"
+        override_level: soft
+
+      - condition: "task_priority == critical"
+        action: "prefer_advanced_model"
+        override_level: soft
+
+      - condition: "consecutive_failures >= 2"
+        action: "upgrade_model"
+        override_level: hard
+
+      - condition: "time_of_day in off_peak_hours"
+        action: "allow_longer_contexts"
+        override_level: soft
+
+# =============================================================================
+# Cost Optimization
+# =============================================================================
+cost_optimization:
+
+  strategies:
+    context_trimming:
+      enabled: true
+      description: "Reduce context size when possible"
+      rules:
+        - "Remove redundant code comments"
+        - "Summarize long conversation history"
+        - "Include only relevant file sections"
+
+    response_length:
+      enabled: true
+      description: "Optimize output token usage"
+      rules:
+        - "Request concise responses for simple tasks"
+        - "Use streaming for long outputs"
+        - "Set appropriate max_tokens per task type"
+
+    caching:
+      enabled: true
+      description: "Cache repeated queries"
+      ttl_minutes: 30
+      cache_candidates:
+        - "Documentation lookups"
+        - "Code pattern searches"
+        - "Repeated validations"
+
+    batching:
+      enabled: true
+      description: "Batch similar requests when possible"
+      max_batch_size: 5
+      max_wait_ms: 1000
+
+# =============================================================================
+# Fallback Configuration
+# =============================================================================
+fallback:
+
+  on_model_unavailable:
+    description: "What to do when preferred model is unavailable"
+    strategy: "try_alternatives"
+    alternatives_order:
+      - primary
+      - advanced
+      - fast
+    max_retries: 3
+    retry_delay_ms: 1000
+
+  on_rate_limit:
+    description: "Handle rate limiting"
+    strategy: "exponential_backoff"
+    initial_delay_ms: 1000
+    max_delay_ms: 60000
+    max_retries: 5
+
+  on_context_too_large:
+    description: "Handle oversized context"
+    strategy: "progressive_trimming"
+    steps:
+      1: "Remove code comments"
+      2: "Summarize conversation history"
+      3: "Keep only most recent context"
+      4: "Split into multiple requests"
+
+# =============================================================================
+# Monitoring & Metrics
+# =============================================================================
+monitoring:
+
+  track_metrics:
+    - "model_usage_by_task_type"
+    - "cost_per_agent"
+    - "success_rate_by_model"
+    - "latency_by_model"
+    - "token_efficiency"
+
+  alerts:
+    - condition: "daily_cost > budget_limit * 0.8"
+      action: "warn"
+      message: "Approaching daily cost limit"
+
+    - condition: "model_error_rate > 0.1"
+      action: "alert"
+      message: "High model error rate detected"
+
+    - condition: "average_latency > 30000"
+      action: "warn"
+      message: "Model response latency degraded"
+
+  reporting:
+    daily_summary: true
+    weekly_analysis: true
+    include_recommendations: true

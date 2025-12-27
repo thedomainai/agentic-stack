@@ -1,0 +1,515 @@
+# Agentic Stack Governance Rules
+# Defines operational policies, constraints, and behavioral guidelines for all agents
+
+version: 1.0
+
+# =============================================================================
+# Core Principles
+# =============================================================================
+principles:
+  description: >
+    Fundamental principles that guide all agent behavior and decision-making.
+
+  safety_first:
+    priority: 1
+    rule: >
+      Never execute actions that could cause irreversible damage without
+      explicit human approval. When in doubt, pause and request intervention.
+
+  transparency:
+    priority: 2
+    rule: >
+      All decisions, actions, and state changes must be logged. The system
+      must be fully auditable at any point in time.
+
+  minimal_privilege:
+    priority: 3
+    rule: >
+      Agents operate with the minimum permissions required for their tasks.
+      Elevated privileges require explicit grants with time limits.
+
+  graceful_degradation:
+    priority: 4
+    rule: >
+      When components fail, the system should degrade gracefully rather than
+      crash. Partial functionality is preferred over complete failure.
+
+  human_in_the_loop:
+    priority: 5
+    rule: >
+      Critical decisions require human oversight. The system operates in
+      monitoring mode with intervention triggers for sensitive operations.
+
+# =============================================================================
+# Operational Policies
+# =============================================================================
+operational:
+
+  # ---------------------------------------------------------------------------
+  # Runtime Configuration
+  # ---------------------------------------------------------------------------
+  runtime:
+    mode: monitoring  # monitoring | autonomous | supervised
+    description: >
+      System operates in monitoring mode - all actions logged, human
+      intervention requested for sensitive operations.
+
+    operating_hours:
+      enabled: false  # Set to true to restrict operation times
+      timezone: "Asia/Tokyo"
+      weekdays:
+        start: "09:00"
+        end: "21:00"
+      weekends:
+        enabled: false
+      holidays:
+        enabled: false
+        calendar: null  # Path to holiday calendar if needed
+
+    maintenance_windows:
+      description: "Scheduled maintenance periods"
+      windows: []  # Example: [{ day: "sunday", start: "02:00", end: "06:00" }]
+
+  # ---------------------------------------------------------------------------
+  # Resource Limits
+  # ---------------------------------------------------------------------------
+  resource_limits:
+    description: "Hard limits to prevent runaway resource consumption"
+
+    llm_usage:
+      daily_token_limit: 1000000  # 1M tokens per day
+      hourly_token_limit: 100000  # 100K tokens per hour
+      max_tokens_per_request: 16000
+      cost_limit_daily_usd: 50.00
+      cost_limit_monthly_usd: 1000.00
+      on_limit_exceeded: pause_and_alert  # pause_and_alert | queue | reject
+
+    task_execution:
+      max_concurrent_tasks: 10
+      max_task_duration_minutes: 60
+      max_retries_per_task: 3
+      task_queue_max_size: 1000
+      high_priority_queue_max_size: 100
+
+    memory:
+      max_context_size_kb: 512
+      max_memory_entries_per_day: 10000
+      memory_retention_days: 90
+
+    api_calls:
+      max_external_api_calls_per_minute: 60
+      max_file_operations_per_minute: 100
+
+  # ---------------------------------------------------------------------------
+  # Timeout Policies
+  # ---------------------------------------------------------------------------
+  timeouts:
+    task_default_ms: 300000        # 5 minutes
+    task_max_ms: 3600000           # 1 hour
+    llm_request_ms: 120000         # 2 minutes
+    external_api_ms: 30000         # 30 seconds
+    agent_heartbeat_ms: 60000      # 1 minute
+    lock_acquisition_ms: 10000     # 10 seconds
+    graceful_shutdown_ms: 30000    # 30 seconds
+
+# =============================================================================
+# Task Execution Rules
+# =============================================================================
+task_rules:
+
+  # ---------------------------------------------------------------------------
+  # Task Acceptance Criteria
+  # ---------------------------------------------------------------------------
+  acceptance:
+    description: "Rules for accepting new tasks"
+
+    required_fields:
+      - title
+
+    validation:
+      - rule: "title_length"
+        condition: "length(title) >= 5 AND length(title) <= 200"
+        error: "Task title must be between 5 and 200 characters"
+
+      - rule: "no_duplicate_active"
+        condition: "no active task with same title exists"
+        error: "A task with this title is already in progress"
+
+    auto_reject:
+      - condition: "contains_profanity(title OR description)"
+        reason: "Inappropriate content"
+      - condition: "task_queue_full AND priority != critical"
+        reason: "Queue capacity exceeded"
+
+  # ---------------------------------------------------------------------------
+  # Task Prioritization
+  # ---------------------------------------------------------------------------
+  prioritization:
+    description: "How tasks are ordered for execution"
+
+    factors:
+      - name: explicit_priority
+        weight: 0.4
+        values:
+          critical: 100
+          high: 75
+          normal: 50
+          low: 25
+
+      - name: age_in_queue
+        weight: 0.2
+        description: "Older tasks get slight priority boost"
+        formula: "min(age_hours * 2, 30)"
+
+      - name: deadline_proximity
+        weight: 0.3
+        description: "Tasks closer to deadline get higher priority"
+        formula: "100 - min(hours_until_deadline, 100)"
+
+      - name: dependency_chain
+        weight: 0.1
+        description: "Tasks blocking others get priority"
+        formula: "blocked_task_count * 10"
+
+  # ---------------------------------------------------------------------------
+  # Task Delegation Rules
+  # ---------------------------------------------------------------------------
+  delegation:
+    description: "Rules for assigning tasks to sub-agents"
+
+    routing:
+      - pattern: "design|architecture|review|refactor"
+        agent: Architect
+        confidence_threshold: 0.7
+
+      - pattern: "implement|code|fix|bug|feature"
+        agent: Coder
+        confidence_threshold: 0.7
+
+      - pattern: "research|search|find|investigate|analyze"
+        agent: Researcher
+        confidence_threshold: 0.7
+
+      - pattern: "test|validate|verify|coverage"
+        agent: Tester
+        confidence_threshold: 0.7
+
+      - pattern: "deploy|infrastructure|docker|kubernetes|ci|cd"
+        agent: Infra
+        confidence_threshold: 0.7
+
+    fallback:
+      when_uncertain: request_clarification
+      when_no_match: assign_to_orchestrator
+
+    constraints:
+      max_tasks_per_agent: 3
+      prefer_idle_agents: true
+      respect_agent_capabilities: true
+
+# =============================================================================
+# Agent Behavior Rules
+# =============================================================================
+agent_rules:
+
+  # ---------------------------------------------------------------------------
+  # General Agent Conduct
+  # ---------------------------------------------------------------------------
+  conduct:
+    description: "Behavioral guidelines for all agents"
+
+    must:
+      - "Log all significant actions to appropriate memory files"
+      - "Report progress at minimum every 60 seconds for long tasks"
+      - "Validate inputs before processing"
+      - "Handle errors gracefully and report failures"
+      - "Respect resource limits and quotas"
+      - "Release locks promptly after use"
+
+    must_not:
+      - "Execute destructive operations without approval"
+      - "Access secrets outside of Vault"
+      - "Bypass rate limits or quotas"
+      - "Modify system configuration without authorization"
+      - "Make external network calls to unapproved domains"
+      - "Store sensitive data in logs or memory files"
+
+    should:
+      - "Prefer simple solutions over complex ones"
+      - "Reuse existing patterns found in the codebase"
+      - "Document non-obvious decisions with rationale"
+      - "Batch similar operations for efficiency"
+
+  # ---------------------------------------------------------------------------
+  # Agent-Specific Rules
+  # ---------------------------------------------------------------------------
+  specific:
+    Architect:
+      max_review_scope_files: 50
+      require_justification_for_breaking_changes: true
+      must_check_consistency_before_approval: true
+
+    Coder:
+      max_files_per_change: 20
+      require_tests_for_new_functions: true
+      forbidden_patterns:
+        - "eval("
+        - "exec("
+        - "__import__"
+        - "subprocess.call.*shell=True"
+      must_run_linter_before_commit: true
+
+    Researcher:
+      allowed_domains:
+        - "*.github.com"
+        - "*.stackoverflow.com"
+        - "*.python.org"
+        - "*.anthropic.com"
+        - "*.openai.com"
+        - "docs.*"
+      max_search_depth: 3
+      cache_results_minutes: 30
+
+    Tester:
+      min_coverage_threshold: 0.7
+      must_report_flaky_tests: true
+      max_test_runtime_minutes: 30
+
+    Infra:
+      require_approval_for_production: true
+      require_rollback_plan: true
+      forbidden_in_production:
+        - "DROP DATABASE"
+        - "rm -rf /"
+        - "--force"
+
+# =============================================================================
+# Approval & Escalation
+# =============================================================================
+approval:
+
+  # ---------------------------------------------------------------------------
+  # Actions Requiring Approval
+  # ---------------------------------------------------------------------------
+  required_approvals:
+    description: "Operations that require human approval before execution"
+
+    critical_operations:
+      - action: "delete_files"
+        condition: "count > 5 OR path contains 'config'"
+        approval_level: human
+        timeout_minutes: 60
+
+      - action: "external_api_call"
+        condition: "domain not in allowed_domains"
+        approval_level: human
+        timeout_minutes: 30
+
+      - action: "deploy_production"
+        condition: "always"
+        approval_level: human
+        timeout_minutes: 120
+
+      - action: "modify_secrets"
+        condition: "always"
+        approval_level: human
+        timeout_minutes: 60
+
+      - action: "database_migration"
+        condition: "always"
+        approval_level: human
+        timeout_minutes: 120
+
+      - action: "budget_exceed"
+        condition: "projected_cost > daily_limit * 0.8"
+        approval_level: human
+        timeout_minutes: 30
+
+    auto_approved:
+      - action: "read_files"
+        condition: "path within project directory"
+
+      - action: "write_logs"
+        condition: "path in [.ai/memory/, .ai/metrics/]"
+
+      - action: "internal_api_call"
+        condition: "always"
+
+  # ---------------------------------------------------------------------------
+  # Escalation Policies
+  # ---------------------------------------------------------------------------
+  escalation:
+    description: "When and how to escalate issues"
+
+    triggers:
+      - condition: "consecutive_failures >= 3"
+        action: escalate_to_human
+        message: "Multiple consecutive failures detected"
+
+      - condition: "task_blocked_minutes >= 30"
+        action: escalate_to_human
+        message: "Task blocked for extended period"
+
+      - condition: "error_rate_last_hour > 0.5"
+        action: pause_and_escalate
+        message: "High error rate detected"
+
+      - condition: "security_violation_detected"
+        action: immediate_halt
+        message: "Potential security issue"
+
+    notification_channels:
+      primary: "TBD"  # Slack, email, etc.
+      fallback: "log_file"
+      critical_contacts: []  # Add contact list
+
+# =============================================================================
+# Audit & Compliance
+# =============================================================================
+audit:
+
+  # ---------------------------------------------------------------------------
+  # Logging Requirements
+  # ---------------------------------------------------------------------------
+  logging:
+    description: "What must be logged for audit purposes"
+
+    required_events:
+      - "task.created"
+      - "task.completed"
+      - "task.failed"
+      - "decision.made"
+      - "approval.requested"
+      - "approval.granted"
+      - "approval.denied"
+      - "secret.accessed"
+      - "external_api.called"
+      - "error.occurred"
+      - "intervention.triggered"
+
+    log_format:
+      timestamp: required
+      event_type: required
+      agent_id: required
+      task_id: when_applicable
+      details: required
+      correlation_id: required
+
+    retention:
+      hot_storage_days: 7
+      warm_storage_days: 30
+      cold_storage_days: 365
+      deletion_policy: "archive_then_delete"
+
+  # ---------------------------------------------------------------------------
+  # Compliance Checks
+  # ---------------------------------------------------------------------------
+  compliance:
+    description: "Automated compliance verification"
+
+    checks:
+      - name: "secret_exposure_check"
+        frequency: "on_every_commit"
+        action: "block_if_failed"
+
+      - name: "dependency_vulnerability_scan"
+        frequency: "daily"
+        action: "alert_if_critical"
+
+      - name: "access_log_review"
+        frequency: "weekly"
+        action: "generate_report"
+
+      - name: "resource_usage_audit"
+        frequency: "monthly"
+        action: "generate_report"
+
+# =============================================================================
+# Change Management
+# =============================================================================
+change_management:
+
+  # ---------------------------------------------------------------------------
+  # Configuration Changes
+  # ---------------------------------------------------------------------------
+  config_changes:
+    description: "Rules for modifying system configuration"
+
+    governance_files:
+      paths:
+        - ".ai/rules/*.yaml"
+        - ".ai/specs/*.yaml"
+      require_approval: true
+      require_review: true
+      notify_on_change: true
+
+    code_changes:
+      require_tests: true
+      require_review: "for_non_trivial"
+      auto_merge_criteria:
+        - "tests_pass"
+        - "coverage_maintained"
+        - "no_security_issues"
+
+  # ---------------------------------------------------------------------------
+  # Version Control
+  # ---------------------------------------------------------------------------
+  versioning:
+    governance_version: "1.0"
+    schema_version: "1.0"
+
+    change_log:
+      location: ".ai/CHANGELOG.md"
+      format: "keep-a-changelog"
+
+    migration:
+      auto_migrate: false
+      require_backup: true
+
+# =============================================================================
+# Emergency Procedures
+# =============================================================================
+emergency:
+
+  # ---------------------------------------------------------------------------
+  # Emergency Stop
+  # ---------------------------------------------------------------------------
+  emergency_stop:
+    description: "Immediate halt procedures"
+
+    triggers:
+      - "manual_trigger"
+      - "security_breach_detected"
+      - "runaway_resource_consumption"
+      - "critical_system_failure"
+
+    actions:
+      1: "Halt all task processing"
+      2: "Cancel in-progress operations gracefully"
+      3: "Release all locks"
+      4: "Log emergency state"
+      5: "Send alerts to all configured channels"
+      6: "Preserve state for post-mortem"
+
+    recovery:
+      require_manual_restart: true
+      require_incident_review: true
+      require_root_cause_analysis: true
+
+  # ---------------------------------------------------------------------------
+  # Rollback Procedures
+  # ---------------------------------------------------------------------------
+  rollback:
+    description: "How to revert changes when issues occur"
+
+    automatic_rollback:
+      enabled: true
+      triggers:
+        - "deployment_health_check_failed"
+        - "error_rate_spike_after_change"
+      max_rollback_window_minutes: 30
+
+    manual_rollback:
+      require_approval: false  # Allow quick rollback
+      require_documentation: true
+      notify_on_execution: true

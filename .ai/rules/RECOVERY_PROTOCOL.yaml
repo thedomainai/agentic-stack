@@ -1,0 +1,469 @@
+# Agentic Stack Recovery Protocol
+# Defines procedures for recovering from failures and incidents
+
+version: 1.0
+
+# =============================================================================
+# Overview
+# =============================================================================
+overview:
+  description: >
+    This document defines the recovery procedures for various failure scenarios.
+    All agents must follow these protocols when encountering errors or failures.
+
+  principles:
+    - "Fail fast, recover gracefully"
+    - "Preserve state before recovery attempts"
+    - "Log all recovery actions for analysis"
+    - "Escalate when automatic recovery fails"
+
+# =============================================================================
+# Failure Classification
+# =============================================================================
+failure_classification:
+
+  severity_levels:
+    critical:
+      description: "System-wide impact, immediate action required"
+      examples:
+        - "All agents unresponsive"
+        - "Data corruption detected"
+        - "Security breach"
+      response_time: immediate
+      escalation: automatic
+
+    high:
+      description: "Significant impact, urgent attention needed"
+      examples:
+        - "Primary service unavailable"
+        - "Task queue backlog growing"
+        - "Multiple agent failures"
+      response_time: 5_minutes
+      escalation: after_2_attempts
+
+    medium:
+      description: "Limited impact, timely resolution needed"
+      examples:
+        - "Single agent failure"
+        - "Performance degradation"
+        - "Non-critical API errors"
+      response_time: 15_minutes
+      escalation: after_3_attempts
+
+    low:
+      description: "Minimal impact, can be addressed during normal operations"
+      examples:
+        - "Intermittent warnings"
+        - "Non-blocking validation failures"
+        - "Cosmetic issues"
+      response_time: 1_hour
+      escalation: manual_only
+
+  failure_categories:
+    infrastructure:
+      - redis_unavailable
+      - rabbitmq_unavailable
+      - vault_unavailable
+      - network_failure
+      - disk_full
+
+    application:
+      - agent_crash
+      - task_timeout
+      - memory_exhaustion
+      - deadlock
+
+    external:
+      - llm_api_error
+      - external_service_error
+      - rate_limit_exceeded
+
+    data:
+      - corruption_detected
+      - schema_mismatch
+      - missing_required_data
+
+# =============================================================================
+# Recovery Procedures
+# =============================================================================
+recovery_procedures:
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure Recovery
+  # ---------------------------------------------------------------------------
+  infrastructure:
+
+    redis_unavailable:
+      severity: critical
+      detection:
+        method: health_check
+        interval_ms: 10000
+      recovery_steps:
+        1:
+          action: "Check Redis container status"
+          command: "docker ps | grep redis"
+          timeout_ms: 5000
+        2:
+          action: "Attempt container restart"
+          command: "docker restart agentic-stack-redis-1"
+          timeout_ms: 30000
+          retry: 2
+        3:
+          action: "Verify connection restored"
+          command: "redis-cli ping"
+          timeout_ms: 5000
+        4:
+          action: "Rebuild state from persistent storage"
+          description: "Reload agent states from JSONL files"
+      fallback:
+        action: "Switch to file-based state temporarily"
+        notify: true
+      post_recovery:
+        - "Validate state consistency"
+        - "Resume paused tasks"
+        - "Log recovery metrics"
+
+    rabbitmq_unavailable:
+      severity: critical
+      detection:
+        method: health_check
+        interval_ms: 10000
+      recovery_steps:
+        1:
+          action: "Check RabbitMQ container status"
+          command: "docker ps | grep rabbitmq"
+        2:
+          action: "Attempt container restart"
+          command: "docker restart agentic-stack-rabbitmq-1"
+          timeout_ms: 60000
+        3:
+          action: "Verify management interface"
+          url: "http://localhost:15672"
+        4:
+          action: "Recreate queues if necessary"
+          description: "Redeclare exchanges and queues"
+      fallback:
+        action: "Queue messages locally, replay when restored"
+        max_local_queue: 1000
+      post_recovery:
+        - "Replay locally queued messages"
+        - "Verify queue depths"
+
+    vault_unavailable:
+      severity: high
+      detection:
+        method: health_check
+        interval_ms: 30000
+      recovery_steps:
+        1:
+          action: "Check Vault container status"
+          command: "docker ps | grep vault"
+        2:
+          action: "Attempt container restart"
+          command: "docker restart agentic-stack-vault-1"
+          timeout_ms: 30000
+        3:
+          action: "Unseal if necessary (dev mode auto-unseals)"
+          description: "In production, may require manual unseal"
+      fallback:
+        action: "Pause operations requiring secrets"
+        notify: true
+        do_not: "Fall back to hardcoded secrets"
+
+  # ---------------------------------------------------------------------------
+  # Application Recovery
+  # ---------------------------------------------------------------------------
+  application:
+
+    agent_crash:
+      severity: medium
+      detection:
+        method: heartbeat_timeout
+        timeout_ms: 120000
+      recovery_steps:
+        1:
+          action: "Log crash state"
+          include: ["last_task", "stack_trace", "memory_state"]
+        2:
+          action: "Release held resources"
+          resources: ["locks", "connections", "file_handles"]
+        3:
+          action: "Restart agent process"
+          timeout_ms: 30000
+        4:
+          action: "Restore agent state"
+          source: "Redis or last checkpoint"
+        5:
+          action: "Resume or reassign in-progress tasks"
+      post_recovery:
+        - "Verify agent responsiveness"
+        - "Check for recurring crash patterns"
+
+    task_timeout:
+      severity: medium
+      detection:
+        method: task_duration_exceeded
+        threshold_ms: 3600000  # 1 hour
+      recovery_steps:
+        1:
+          action: "Send cancellation signal to agent"
+          timeout_ms: 30000
+        2:
+          action: "Force terminate if no response"
+          graceful_first: true
+        3:
+          action: "Log partial results if available"
+        4:
+          action: "Determine retry eligibility"
+          criteria:
+            - "retry_count < max_retries"
+            - "not_marked_non_retryable"
+        5:
+          action: "Retry with adjusted parameters OR mark failed"
+          adjustments:
+            - "Increase timeout"
+            - "Reduce scope"
+            - "Use different model"
+      post_recovery:
+        - "Analyze timeout cause"
+        - "Update timeout thresholds if pattern detected"
+
+    memory_exhaustion:
+      severity: high
+      detection:
+        method: memory_threshold
+        threshold_percent: 90
+      recovery_steps:
+        1:
+          action: "Pause new task acceptance"
+        2:
+          action: "Force garbage collection"
+        3:
+          action: "Clear non-essential caches"
+        4:
+          action: "Terminate lowest-priority tasks"
+        5:
+          action: "Restart affected agents if necessary"
+      prevention:
+        - "Monitor memory trends"
+        - "Set per-task memory limits"
+        - "Implement streaming for large data"
+
+  # ---------------------------------------------------------------------------
+  # External Service Recovery
+  # ---------------------------------------------------------------------------
+  external:
+
+    llm_api_error:
+      severity: medium
+      detection:
+        method: api_response_code
+        error_codes: [429, 500, 502, 503, 504]
+      recovery_steps:
+        1:
+          action: "Classify error type"
+          types:
+            rate_limit: 429
+            server_error: [500, 502, 503, 504]
+            auth_error: [401, 403]
+        2:
+          action: "Apply appropriate backoff"
+          rate_limit:
+            strategy: exponential_backoff
+            initial_ms: 1000
+            max_ms: 60000
+          server_error:
+            strategy: retry_with_backoff
+            max_retries: 3
+        3:
+          action: "Try fallback model if available"
+          condition: "primary model consistently failing"
+        4:
+          action: "Queue request for later if all retries fail"
+      post_recovery:
+        - "Log error patterns for analysis"
+        - "Adjust rate limiting if needed"
+
+    external_service_error:
+      severity: medium
+      recovery_steps:
+        1:
+          action: "Identify failing service"
+        2:
+          action: "Check service status page if available"
+        3:
+          action: "Retry with exponential backoff"
+          max_retries: 3
+        4:
+          action: "Use cached data if available and acceptable"
+        5:
+          action: "Mark dependent tasks as blocked"
+      fallback:
+        action: "Continue without external data if non-critical"
+
+  # ---------------------------------------------------------------------------
+  # Data Recovery
+  # ---------------------------------------------------------------------------
+  data:
+
+    corruption_detected:
+      severity: critical
+      detection:
+        method: checksum_validation
+      recovery_steps:
+        1:
+          action: "Isolate corrupted data"
+          do_not: "Propagate corruption"
+        2:
+          action: "Identify corruption scope"
+        3:
+          action: "Restore from last known good backup"
+        4:
+          action: "Replay operations since backup"
+          source: "Operation logs"
+        5:
+          action: "Validate restored data"
+      post_recovery:
+        - "Root cause analysis"
+        - "Implement additional safeguards"
+
+    schema_mismatch:
+      severity: medium
+      recovery_steps:
+        1:
+          action: "Identify schema version mismatch"
+        2:
+          action: "Apply migration if available"
+        3:
+          action: "Transform data to expected schema"
+        4:
+          action: "Validate transformed data"
+      prevention:
+        - "Version all schemas"
+        - "Maintain backward compatibility"
+
+# =============================================================================
+# Rollback Procedures
+# =============================================================================
+rollback:
+
+  automatic:
+    enabled: true
+    triggers:
+      - condition: "deployment_health_check_failed"
+        window_minutes: 10
+      - condition: "error_rate > 0.5 after deployment"
+        window_minutes: 30
+
+    procedure:
+      1:
+        action: "Pause incoming requests"
+      2:
+        action: "Stop current deployment"
+      3:
+        action: "Restore previous version"
+        method: "container_image_rollback"
+      4:
+        action: "Verify rollback success"
+      5:
+        action: "Resume traffic"
+      6:
+        action: "Notify stakeholders"
+
+  manual:
+    trigger: "Human decision"
+    require_confirmation: true
+    procedure:
+      1:
+        action: "Document rollback reason"
+      2:
+        action: "Execute rollback script"
+        script: ".ai/automation/recovery_scripts/rollback.py"
+      3:
+        action: "Validate system state"
+      4:
+        action: "Create incident report"
+
+# =============================================================================
+# State Preservation
+# =============================================================================
+state_preservation:
+
+  checkpoints:
+    frequency: every_task_completion
+    storage: ".ai/memory/checkpoints/"
+    retention_count: 10
+
+    contents:
+      - "agent_states"
+      - "task_queue_snapshot"
+      - "in_progress_tasks"
+      - "recent_decisions"
+
+  backup:
+    frequency: daily
+    storage: "configurable_backup_location"
+    retention_days: 30
+
+    contents:
+      - "All .ai/ directory"
+      - "Redis dump"
+      - "RabbitMQ definitions"
+
+# =============================================================================
+# Monitoring & Alerting
+# =============================================================================
+monitoring:
+
+  health_checks:
+    interval_ms: 30000
+    components:
+      - name: redis
+        check: "PING command"
+      - name: rabbitmq
+        check: "Management API"
+      - name: vault
+        check: "Health endpoint"
+      - name: agents
+        check: "Heartbeat response"
+
+  alerting:
+    channels:
+      - type: log
+        always: true
+      - type: notification
+        severity: [high, critical]
+
+    alert_fatigue_prevention:
+      deduplication_window_minutes: 15
+      max_alerts_per_hour: 10
+      consolidate_similar: true
+
+# =============================================================================
+# Post-Incident
+# =============================================================================
+post_incident:
+
+  required_actions:
+    - "Document incident timeline"
+    - "Identify root cause"
+    - "Document recovery steps taken"
+    - "Identify preventive measures"
+    - "Update runbooks if needed"
+    - "Schedule follow-up review"
+
+  incident_report_template:
+    sections:
+      - "Summary"
+      - "Timeline"
+      - "Impact"
+      - "Root Cause"
+      - "Resolution"
+      - "Preventive Actions"
+      - "Lessons Learned"
+
+  review_schedule:
+    critical: within_24_hours
+    high: within_48_hours
+    medium: within_1_week
+    low: monthly_batch

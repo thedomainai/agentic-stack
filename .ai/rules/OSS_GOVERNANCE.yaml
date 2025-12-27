@@ -1,0 +1,348 @@
+# Agentic Stack OSS Governance
+# Defines policies for open source software usage and contribution
+
+version: 1.0
+
+# =============================================================================
+# Overview
+# =============================================================================
+overview:
+  description: >
+    This document defines the policies and procedures for using and
+    contributing to open source software within the Agentic Stack project.
+
+  goals:
+    - "Ensure legal compliance with OSS licenses"
+    - "Manage security risks from OSS dependencies"
+    - "Maintain attribution and compliance requirements"
+    - "Enable responsible OSS contribution"
+
+# =============================================================================
+# License Policies
+# =============================================================================
+license_policies:
+
+  # ---------------------------------------------------------------------------
+  # Approved Licenses
+  # ---------------------------------------------------------------------------
+  approved:
+    description: "Licenses approved for use without additional review"
+
+    permissive:
+      - name: MIT
+        spdx_id: MIT
+        restrictions: none
+
+      - name: Apache-2.0
+        spdx_id: Apache-2.0
+        restrictions: none
+        note: "Patent grant included"
+
+      - name: BSD-2-Clause
+        spdx_id: BSD-2-Clause
+        restrictions: none
+
+      - name: BSD-3-Clause
+        spdx_id: BSD-3-Clause
+        restrictions: none
+
+      - name: ISC
+        spdx_id: ISC
+        restrictions: none
+
+      - name: Python-2.0
+        spdx_id: Python-2.0
+        restrictions: none
+
+      - name: Unlicense
+        spdx_id: Unlicense
+        restrictions: none
+
+  # ---------------------------------------------------------------------------
+  # Requires Review
+  # ---------------------------------------------------------------------------
+  requires_review:
+    description: "Licenses that require case-by-case review"
+
+    weak_copyleft:
+      - name: LGPL-2.1
+        spdx_id: LGPL-2.1-only
+        concern: "Dynamic linking requirements"
+        review_focus: "Usage pattern"
+
+      - name: LGPL-3.0
+        spdx_id: LGPL-3.0-only
+        concern: "Dynamic linking requirements"
+        review_focus: "Usage pattern"
+
+      - name: MPL-2.0
+        spdx_id: MPL-2.0
+        concern: "File-level copyleft"
+        review_focus: "Modification patterns"
+
+      - name: EPL-2.0
+        spdx_id: EPL-2.0
+        concern: "Weak copyleft terms"
+        review_focus: "Distribution plans"
+
+    commercial:
+      - name: "Commercial/Proprietary"
+        concern: "License fees, usage restrictions"
+        review_focus: "Terms compatibility with project"
+
+  # ---------------------------------------------------------------------------
+  # Prohibited Licenses
+  # ---------------------------------------------------------------------------
+  prohibited:
+    description: "Licenses not permitted for use"
+
+    strong_copyleft:
+      - name: GPL-2.0
+        spdx_id: GPL-2.0-only
+        reason: "Copyleft requirements incompatible with project"
+
+      - name: GPL-3.0
+        spdx_id: GPL-3.0-only
+        reason: "Copyleft requirements incompatible with project"
+
+      - name: AGPL-3.0
+        spdx_id: AGPL-3.0-only
+        reason: "Network copyleft requirements"
+
+    other:
+      - name: SSPL
+        reason: "Service-level copyleft"
+
+      - name: Commons Clause
+        reason: "Commercial use restrictions"
+
+# =============================================================================
+# Dependency Approval Process
+# =============================================================================
+approval_process:
+
+  # ---------------------------------------------------------------------------
+  # New Dependency Addition
+  # ---------------------------------------------------------------------------
+  new_dependency:
+    description: "Process for adding new OSS dependencies"
+
+    steps:
+      1:
+        action: "License identification"
+        required: true
+        description: "Identify the license(s) of the package"
+
+      2:
+        action: "License classification"
+        required: true
+        description: "Classify as approved/review/prohibited"
+
+      3:
+        action: "Security check"
+        required: true
+        description: "Check for known vulnerabilities"
+        tools: ["safety", "snyk", "npm audit"]
+
+      4:
+        action: "Maintenance assessment"
+        required: true
+        criteria:
+          - "Last commit within 12 months"
+          - "Active issue response"
+          - "No abandonment indicators"
+
+      5:
+        action: "Quality assessment"
+        required: false
+        criteria:
+          - "Test coverage"
+          - "Documentation quality"
+          - "Community size"
+
+      6:
+        action: "Approval decision"
+        approvers:
+          approved_license: "auto_approve"
+          review_license: "human_review"
+          prohibited_license: "reject"
+
+  # ---------------------------------------------------------------------------
+  # Existing Dependency Updates
+  # ---------------------------------------------------------------------------
+  dependency_update:
+    description: "Process for updating existing dependencies"
+
+    automatic_allowed:
+      - "Patch versions (x.x.PATCH)"
+      - "Security fixes"
+
+    requires_review:
+      - "Major versions (MAJOR.x.x)"
+      - "License changes"
+      - "Breaking API changes"
+
+# =============================================================================
+# Attribution Requirements
+# =============================================================================
+attribution:
+
+  required_for:
+    - "All OSS dependencies"
+    - "Code snippets from external sources"
+    - "Modified OSS code"
+
+  format:
+    location: "THIRD_PARTY_LICENSES.md"
+
+    per_dependency:
+      required_fields:
+        - package_name
+        - version
+        - license_type
+        - copyright_notice
+        - license_url
+
+      optional_fields:
+        - modifications_made
+        - source_url
+
+  generation:
+    tool: "license-checker or similar"
+    frequency: "on_dependency_change"
+    automation: true
+
+# =============================================================================
+# Contribution Guidelines
+# =============================================================================
+contribution:
+
+  # ---------------------------------------------------------------------------
+  # Outbound Contributions
+  # ---------------------------------------------------------------------------
+  outbound:
+    description: "Contributing to external OSS projects"
+
+    approval_required:
+      - "Any contribution during work hours"
+      - "Contributions referencing this project"
+      - "Large contributions (>100 lines)"
+
+    not_required:
+      - "Bug fixes under 20 lines"
+      - "Documentation improvements"
+      - "Personal projects unrelated to work"
+
+    guidelines:
+      - "Do not include proprietary code"
+      - "Do not include internal references"
+      - "Follow target project's contribution guidelines"
+      - "Use personal email for personal projects"
+
+  # ---------------------------------------------------------------------------
+  # Inbound Contributions (if project is open-sourced)
+  # ---------------------------------------------------------------------------
+  inbound:
+    description: "Accepting contributions from external parties"
+
+    requirements:
+      - "Contributor License Agreement (CLA) signed"
+      - "Code review passed"
+      - "Tests included"
+      - "Documentation updated"
+
+    cla:
+      type: "Individual and Corporate"
+      required: true
+      automation: "CLA bot"
+
+# =============================================================================
+# Security Policies
+# =============================================================================
+security:
+
+  vulnerability_response:
+    critical:
+      response_time: "24 hours"
+      action: "Immediate patch or removal"
+
+    high:
+      response_time: "7 days"
+      action: "Patch in next release"
+
+    medium:
+      response_time: "30 days"
+      action: "Schedule patch"
+
+    low:
+      response_time: "90 days"
+      action: "Include in regular updates"
+
+  scanning:
+    frequency: "daily"
+    tools:
+      - "safety (Python)"
+      - "npm audit (Node.js)"
+      - "snyk"
+
+    on_failure:
+      critical: "block_deployment"
+      high: "warn_and_track"
+      medium: "log_for_review"
+
+# =============================================================================
+# Compliance Monitoring
+# =============================================================================
+monitoring:
+
+  automated_checks:
+    - name: "License scan"
+      frequency: "on_commit"
+      tool: "license-checker"
+      action_on_violation: "block_merge"
+
+    - name: "Vulnerability scan"
+      frequency: "daily"
+      tool: "safety + snyk"
+      action_on_violation: "alert"
+
+    - name: "Attribution verification"
+      frequency: "weekly"
+      action_on_violation: "create_task"
+
+  reporting:
+    frequency: "monthly"
+    includes:
+      - "New dependencies added"
+      - "License distribution"
+      - "Vulnerability summary"
+      - "Compliance status"
+
+# =============================================================================
+# Exceptions
+# =============================================================================
+exceptions:
+
+  process:
+    description: "How to request an exception to these policies"
+
+    steps:
+      1: "Document the need for exception"
+      2: "Identify specific risks"
+      3: "Propose mitigations"
+      4: "Submit for review"
+      5: "Document decision"
+
+  tracking:
+    location: ".ai/memory/DECISIONS.jsonl"
+    required_fields:
+      - "exception_type"
+      - "justification"
+      - "risks_accepted"
+      - "mitigations"
+      - "approval_date"
+      - "review_date"
+
+  review:
+    frequency: "quarterly"
+    action: "Reassess continued need for exception"

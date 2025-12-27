@@ -1,0 +1,324 @@
+# Agentic Stack Idle Protocol
+# Defines behavior when agents have no active tasks
+
+version: 1.0
+
+# =============================================================================
+# Overview
+# =============================================================================
+overview:
+  description: >
+    This protocol defines what agents should do during idle periods.
+    Idle time is used productively for maintenance, optimization, and
+    proactive improvements while conserving resources.
+
+  goals:
+    - "Maintain system health during low activity"
+    - "Optimize resource usage"
+    - "Perform proactive maintenance"
+    - "Prepare for future tasks"
+
+# =============================================================================
+# Idle Detection
+# =============================================================================
+idle_detection:
+
+  criteria:
+    no_pending_tasks:
+      check: "task_queue.pending_count == 0"
+      weight: 0.5
+
+    no_in_progress:
+      check: "task_queue.in_progress_count == 0"
+      weight: 0.3
+
+    low_message_rate:
+      check: "messages_per_minute < 5"
+      duration_minutes: 5
+      weight: 0.2
+
+  idle_threshold: 0.8  # Combined weight score to trigger idle mode
+  check_interval_ms: 60000  # Check every minute
+
+# =============================================================================
+# Idle States
+# =============================================================================
+idle_states:
+
+  # ---------------------------------------------------------------------------
+  # Light Idle - Brief pause, ready to resume quickly
+  # ---------------------------------------------------------------------------
+  light_idle:
+    trigger_after_minutes: 1
+    description: "Short idle period, remain fully responsive"
+
+    behavior:
+      heartbeat_interval_ms: 30000  # Normal frequency
+      resource_mode: normal
+      wake_on: any_event
+
+    activities:
+      - name: "Process pending logs"
+        priority: high
+        description: "Flush any buffered log entries"
+
+      - name: "Update metrics"
+        priority: high
+        description: "Calculate and record current metrics"
+
+  # ---------------------------------------------------------------------------
+  # Active Idle - Productive maintenance work
+  # ---------------------------------------------------------------------------
+  active_idle:
+    trigger_after_minutes: 5
+    description: "Use idle time for productive maintenance"
+
+    behavior:
+      heartbeat_interval_ms: 30000
+      resource_mode: normal
+      wake_on: any_event
+      interrupt_on: new_task
+
+    activities:
+      - name: "Memory consolidation"
+        priority: high
+        frequency: once_per_idle_period
+        description: "Analyze and consolidate memory entries"
+        actions:
+          - "Deduplicate similar discoveries"
+          - "Archive old context handoffs"
+          - "Summarize decision patterns"
+
+      - name: "Cache optimization"
+        priority: medium
+        frequency: every_30_minutes
+        description: "Optimize cache entries"
+        actions:
+          - "Remove expired entries"
+          - "Preload frequently accessed data"
+          - "Compact cache storage"
+
+      - name: "Health diagnostics"
+        priority: medium
+        frequency: every_15_minutes
+        description: "Run health checks"
+        actions:
+          - "Check all service connections"
+          - "Verify queue health"
+          - "Test Vault accessibility"
+
+      - name: "Log analysis"
+        priority: low
+        frequency: every_hour
+        description: "Analyze recent logs for patterns"
+        actions:
+          - "Identify recurring errors"
+          - "Detect performance anomalies"
+          - "Generate insights"
+
+      - name: "Dependency check"
+        priority: low
+        frequency: daily
+        description: "Check for dependency updates"
+        actions:
+          - "Scan for security advisories"
+          - "Check for new versions"
+          - "Report findings"
+
+  # ---------------------------------------------------------------------------
+  # Deep Idle - Extended inactivity, reduce resources
+  # ---------------------------------------------------------------------------
+  deep_idle:
+    trigger_after_minutes: 30
+    description: "Extended idle, reduce resource consumption"
+
+    behavior:
+      heartbeat_interval_ms: 60000  # Reduced frequency
+      resource_mode: low_power
+      wake_on: task_event
+      wake_latency_ms: 5000  # Acceptable delay to wake
+
+    resource_reduction:
+      - "Release non-essential connections"
+      - "Reduce memory footprint"
+      - "Pause non-critical background tasks"
+      - "Consolidate agent processes"
+
+    maintain:
+      - "Core orchestrator responsiveness"
+      - "Health check endpoints"
+      - "Task queue monitoring"
+
+    activities:
+      - name: "Deep cleanup"
+        priority: low
+        frequency: once_per_deep_idle
+        description: "Thorough system cleanup"
+        actions:
+          - "Archive old log files"
+          - "Clean temporary files"
+          - "Optimize database/storage"
+
+  # ---------------------------------------------------------------------------
+  # Hibernation - Very long inactivity
+  # ---------------------------------------------------------------------------
+  hibernation:
+    trigger_after_minutes: 120
+    description: "Minimal resource usage, quick wake capability"
+
+    behavior:
+      heartbeat_interval_ms: 120000  # Minimal
+      resource_mode: minimal
+      wake_on: explicit_wake_or_task
+      wake_latency_ms: 30000  # Longer acceptable delay
+
+    resource_reduction:
+      - "Stop all non-essential agents"
+      - "Keep only orchestrator minimal process"
+      - "Persist state to disk"
+
+    maintain:
+      - "API endpoint for wake signal"
+      - "Task queue listener (minimal)"
+
+    wake_procedure:
+      1: "Receive wake signal"
+      2: "Load persisted state"
+      3: "Restart agent processes"
+      4: "Verify all connections"
+      5: "Resume normal operation"
+
+# =============================================================================
+# Proactive Tasks
+# =============================================================================
+proactive_tasks:
+  description: >
+    Optional tasks that can be performed during idle time to improve
+    system performance and prepare for future work.
+
+  enabled: true
+  max_resource_usage: 0.3  # Max 30% of resources for proactive work
+  interrupt_immediately: true  # Stop for real work
+
+  tasks:
+    - name: "Codebase indexing"
+      description: "Pre-index codebase for faster searches"
+      frequency: daily
+      agent: Researcher
+      priority: low
+      max_duration_minutes: 30
+
+    - name: "Test suite analysis"
+      description: "Analyze test coverage and identify gaps"
+      frequency: weekly
+      agent: Tester
+      priority: low
+      max_duration_minutes: 60
+
+    - name: "Documentation audit"
+      description: "Check for outdated documentation"
+      frequency: weekly
+      agent: Architect
+      priority: low
+      max_duration_minutes: 30
+
+    - name: "Performance profiling"
+      description: "Profile and identify optimization opportunities"
+      frequency: weekly
+      agent: Coder
+      priority: low
+      max_duration_minutes: 45
+
+    - name: "Security scan"
+      description: "Proactive security vulnerability scan"
+      frequency: daily
+      agent: Infra
+      priority: medium
+      max_duration_minutes: 30
+
+# =============================================================================
+# Resource Management
+# =============================================================================
+resource_management:
+
+  scaling:
+    description: "How to scale resources based on idle state"
+
+    rules:
+      - state: light_idle
+        cpu_limit: 100%
+        memory_limit: 100%
+        connections: maintain_all
+
+      - state: active_idle
+        cpu_limit: 80%
+        memory_limit: 100%
+        connections: maintain_all
+
+      - state: deep_idle
+        cpu_limit: 30%
+        memory_limit: 50%
+        connections: essential_only
+
+      - state: hibernation
+        cpu_limit: 10%
+        memory_limit: 20%
+        connections: minimal
+
+  connection_pools:
+    essential:
+      - redis_primary
+      - rabbitmq_listener
+    non_essential:
+      - additional_redis_connections
+      - rabbitmq_publishers
+      - external_api_connections
+
+# =============================================================================
+# Transition Rules
+# =============================================================================
+transitions:
+
+  to_active:
+    from: [light_idle, active_idle, deep_idle, hibernation]
+    trigger: new_task_received
+    procedure:
+      1: "Cancel current idle activity"
+      2: "Restore full resources if reduced"
+      3: "Wake sleeping agents"
+      4: "Process new task"
+    max_transition_time_ms:
+      from_light_idle: 100
+      from_active_idle: 500
+      from_deep_idle: 5000
+      from_hibernation: 30000
+
+  between_idle_states:
+    require_no_pending_tasks: true
+    gradual: true  # Don't skip states
+
+# =============================================================================
+# Monitoring
+# =============================================================================
+monitoring:
+
+  metrics:
+    - "idle_time_total"
+    - "idle_time_by_state"
+    - "proactive_tasks_completed"
+    - "wake_latency"
+    - "resource_savings"
+
+  logging:
+    state_transitions: true
+    activity_completion: true
+    resource_changes: true
+
+  alerts:
+    - condition: "idle_time > 24_hours"
+      action: notify
+      message: "System idle for extended period"
+
+    - condition: "wake_latency > expected * 2"
+      action: warn
+      message: "Slow wake from idle state"

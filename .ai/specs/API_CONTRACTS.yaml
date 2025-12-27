@@ -1,0 +1,898 @@
+# Agentic Stack API Contracts Specification
+# Defines REST API endpoints, WebSocket events, and internal RPC contracts
+
+version: 1.0
+
+# =============================================================================
+# API Overview
+# =============================================================================
+overview:
+  title: Agentic Stack API
+  description: >
+    API contracts for the Agentic Stack orchestrator system.
+    Provides interfaces for task management, agent monitoring, and system operations.
+  base_url: "/api/v1"
+  protocols:
+    - REST (primary external interface)
+    - WebSocket (real-time updates)
+    - Internal RPC (agent-to-agent via RabbitMQ)
+  authentication:
+    type: Bearer Token
+    header: "Authorization: Bearer {token}"
+    token_source: HashiCorp Vault
+  content_type: application/json
+  rate_limiting:
+    enabled: true
+    default_limit: "100 requests/minute"
+    burst_limit: "20 requests/second"
+
+# =============================================================================
+# REST API Endpoints
+# =============================================================================
+rest_api:
+
+  # ---------------------------------------------------------------------------
+  # Tasks API - Task lifecycle management
+  # ---------------------------------------------------------------------------
+  tasks:
+    base_path: "/tasks"
+
+    endpoints:
+      # Create a new task
+      - method: POST
+        path: "/"
+        operation_id: createTask
+        summary: "Create a new task"
+        description: >
+          Submit a new task to the orchestrator. The task will be analyzed,
+          decomposed if necessary, and delegated to appropriate sub-agents.
+        request_body:
+          required: true
+          schema:
+            type: object
+            required: [title]
+            properties:
+              title:
+                type: string
+                max_length: 200
+                example: "Implement user authentication"
+              description:
+                type: string
+                example: "Add JWT-based authentication to the API endpoints"
+              priority:
+                type: string
+                enum: [low, normal, high, critical]
+                default: normal
+              tags:
+                type: array
+                items: string
+                example: ["backend", "security"]
+              deadline:
+                type: string
+                format: ISO8601
+                example: "2025-01-15T18:00:00Z"
+              metadata:
+                type: object
+                description: "Arbitrary key-value pairs"
+        responses:
+          201:
+            description: "Task created successfully"
+            body:
+              task_id: uuid
+              status: pending
+              created_at: datetime
+              estimated_completion: datetime (optional)
+          400:
+            description: "Invalid request body"
+            body:
+              error: string
+              details: array
+          429:
+            description: "Rate limit exceeded"
+
+      # List tasks with filtering
+      - method: GET
+        path: "/"
+        operation_id: listTasks
+        summary: "List tasks with optional filtering"
+        parameters:
+          - name: status
+            in: query
+            type: string
+            enum: [pending, queued, in_progress, blocked, completed, failed, cancelled]
+            description: "Filter by status"
+          - name: priority
+            in: query
+            type: string
+            enum: [low, normal, high, critical]
+          - name: assigned_agent
+            in: query
+            type: string
+            enum: [Architect, Coder, Researcher, Tester, Infra]
+          - name: created_after
+            in: query
+            type: string
+            format: ISO8601
+          - name: created_before
+            in: query
+            type: string
+            format: ISO8601
+          - name: limit
+            in: query
+            type: integer
+            default: 50
+            max: 100
+          - name: offset
+            in: query
+            type: integer
+            default: 0
+          - name: sort
+            in: query
+            type: string
+            enum: [created_at, updated_at, priority]
+            default: created_at
+          - name: order
+            in: query
+            type: string
+            enum: [asc, desc]
+            default: desc
+        responses:
+          200:
+            description: "List of tasks"
+            body:
+              tasks: array[Task]
+              total: integer
+              limit: integer
+              offset: integer
+              has_more: boolean
+
+      # Get task by ID
+      - method: GET
+        path: "/{task_id}"
+        operation_id: getTask
+        summary: "Get task details by ID"
+        parameters:
+          - name: task_id
+            in: path
+            type: uuid
+            required: true
+          - name: include_subtasks
+            in: query
+            type: boolean
+            default: false
+        responses:
+          200:
+            description: "Task details"
+            body:
+              task: Task
+              subtasks: array[Task] (if include_subtasks=true)
+              timeline: array[TaskEvent]
+          404:
+            description: "Task not found"
+
+      # Update task
+      - method: PATCH
+        path: "/{task_id}"
+        operation_id: updateTask
+        summary: "Update task properties"
+        description: >
+          Update mutable properties of a task. Some fields can only be
+          updated when the task is in certain states.
+        parameters:
+          - name: task_id
+            in: path
+            type: uuid
+            required: true
+        request_body:
+          schema:
+            type: object
+            properties:
+              title:
+                type: string
+              description:
+                type: string
+              priority:
+                type: string
+                enum: [low, normal, high, critical]
+              deadline:
+                type: string
+                format: ISO8601
+              tags:
+                type: array
+                items: string
+              metadata:
+                type: object
+        responses:
+          200:
+            description: "Task updated"
+            body:
+              task: Task
+          400:
+            description: "Invalid update for current task state"
+          404:
+            description: "Task not found"
+
+      # Cancel task
+      - method: POST
+        path: "/{task_id}/cancel"
+        operation_id: cancelTask
+        summary: "Cancel a task"
+        description: >
+          Request cancellation of a task. If the task is in progress,
+          the assigned agent will be notified to stop work gracefully.
+        parameters:
+          - name: task_id
+            in: path
+            type: uuid
+            required: true
+        request_body:
+          schema:
+            type: object
+            properties:
+              reason:
+                type: string
+                description: "Optional cancellation reason"
+        responses:
+          200:
+            description: "Cancellation initiated"
+            body:
+              task_id: uuid
+              status: cancelled
+              cancelled_at: datetime
+          400:
+            description: "Task cannot be cancelled (already completed/failed)"
+          404:
+            description: "Task not found"
+
+      # Retry failed task
+      - method: POST
+        path: "/{task_id}/retry"
+        operation_id: retryTask
+        summary: "Retry a failed task"
+        parameters:
+          - name: task_id
+            in: path
+            type: uuid
+            required: true
+        request_body:
+          schema:
+            type: object
+            properties:
+              force:
+                type: boolean
+                default: false
+                description: "Retry even if max retries exceeded"
+              modified_params:
+                type: object
+                description: "Override original task parameters"
+        responses:
+          200:
+            description: "Retry initiated"
+            body:
+              new_task_id: uuid
+              original_task_id: uuid
+              status: pending
+          400:
+            description: "Task is not in failed state"
+          404:
+            description: "Task not found"
+
+  # ---------------------------------------------------------------------------
+  # Agents API - Agent monitoring and management
+  # ---------------------------------------------------------------------------
+  agents:
+    base_path: "/agents"
+
+    endpoints:
+      # List all agents
+      - method: GET
+        path: "/"
+        operation_id: listAgents
+        summary: "List all agents and their current status"
+        responses:
+          200:
+            description: "List of agents"
+            body:
+              agents:
+                type: array
+                items:
+                  agent_id: string
+                  agent_type: string
+                  status: string
+                  current_task_id: uuid (nullable)
+                  last_heartbeat: datetime
+                  metrics:
+                    tasks_completed: integer
+                    tasks_failed: integer
+                    uptime_seconds: integer
+
+      # Get specific agent details
+      - method: GET
+        path: "/{agent_id}"
+        operation_id: getAgent
+        summary: "Get detailed information about an agent"
+        parameters:
+          - name: agent_id
+            in: path
+            type: string
+            required: true
+        responses:
+          200:
+            description: "Agent details"
+            body:
+              agent: Agent
+              current_task: Task (nullable)
+              recent_tasks:
+                type: array
+                items: Task
+                max_items: 10
+              capabilities: array[string]
+          404:
+            description: "Agent not found"
+
+      # Get agent metrics
+      - method: GET
+        path: "/{agent_id}/metrics"
+        operation_id: getAgentMetrics
+        summary: "Get performance metrics for an agent"
+        parameters:
+          - name: agent_id
+            in: path
+            type: string
+            required: true
+          - name: period
+            in: query
+            type: string
+            enum: [hour, day, week, month]
+            default: day
+        responses:
+          200:
+            description: "Agent metrics"
+            body:
+              agent_id: string
+              period: string
+              metrics:
+                tasks_completed: integer
+                tasks_failed: integer
+                success_rate: float
+                average_duration_ms: integer
+                p50_duration_ms: integer
+                p95_duration_ms: integer
+
+  # ---------------------------------------------------------------------------
+  # Memory API - Access to agent memory/logs
+  # ---------------------------------------------------------------------------
+  memory:
+    base_path: "/memory"
+
+    endpoints:
+      # Get decisions log
+      - method: GET
+        path: "/decisions"
+        operation_id: getDecisions
+        summary: "Query decision logs"
+        parameters:
+          - name: agent
+            in: query
+            type: string
+          - name: decision_type
+            in: query
+            type: string
+            enum: [task_delegation, approach_selection, error_handling, resource_allocation, intervention_request]
+          - name: task_id
+            in: query
+            type: uuid
+          - name: since
+            in: query
+            type: string
+            format: ISO8601
+          - name: until
+            in: query
+            type: string
+            format: ISO8601
+          - name: limit
+            in: query
+            type: integer
+            default: 50
+            max: 200
+        responses:
+          200:
+            description: "Decision logs"
+            body:
+              decisions: array[DecisionLog]
+              total: integer
+
+      # Get failures log
+      - method: GET
+        path: "/failures"
+        operation_id: getFailures
+        summary: "Query failure logs"
+        parameters:
+          - name: agent
+            in: query
+            type: string
+          - name: severity
+            in: query
+            type: string
+            enum: [warning, error, critical]
+          - name: category
+            in: query
+            type: string
+          - name: resolved
+            in: query
+            type: boolean
+          - name: since
+            in: query
+            type: string
+            format: ISO8601
+          - name: limit
+            in: query
+            type: integer
+            default: 50
+        responses:
+          200:
+            description: "Failure logs"
+            body:
+              failures: array[FailureLog]
+              total: integer
+              unresolved_count: integer
+
+      # Get discoveries
+      - method: GET
+        path: "/discoveries"
+        operation_id: getDiscoveries
+        summary: "Query discovery logs"
+        parameters:
+          - name: category
+            in: query
+            type: string
+            enum: [codebase_pattern, best_practice, anti_pattern, dependency_info, performance_insight, domain_knowledge]
+          - name: tags
+            in: query
+            type: array
+            items: string
+          - name: min_confidence
+            in: query
+            type: float
+            min: 0.0
+            max: 1.0
+          - name: limit
+            in: query
+            type: integer
+            default: 50
+        responses:
+          200:
+            description: "Discovery logs"
+            body:
+              discoveries: array[DiscoveryLog]
+              total: integer
+
+  # ---------------------------------------------------------------------------
+  # Metrics API - System metrics and analytics
+  # ---------------------------------------------------------------------------
+  metrics:
+    base_path: "/metrics"
+
+    endpoints:
+      # Get velocity metrics
+      - method: GET
+        path: "/velocity"
+        operation_id: getVelocity
+        summary: "Get task completion velocity metrics"
+        parameters:
+          - name: period
+            in: query
+            type: string
+            enum: [hourly, daily, weekly]
+            default: daily
+          - name: since
+            in: query
+            type: string
+            format: ISO8601
+          - name: until
+            in: query
+            type: string
+            format: ISO8601
+        responses:
+          200:
+            description: "Velocity metrics"
+            body:
+              metrics: array[VelocityMetric]
+              summary:
+                total_completed: integer
+                total_failed: integer
+                average_completion_rate: float
+
+      # Get budget tracking
+      - method: GET
+        path: "/budget"
+        operation_id: getBudget
+        summary: "Get budget and cost tracking"
+        parameters:
+          - name: period
+            in: query
+            type: string
+            enum: [daily, weekly, monthly]
+            default: monthly
+        responses:
+          200:
+            description: "Budget metrics"
+            body:
+              current_period: BudgetTracker
+              historical: array[BudgetTracker]
+              projections:
+                end_of_period_cost: float
+                days_until_budget_exhausted: integer (nullable)
+
+      # Get ROI report
+      - method: GET
+        path: "/roi"
+        operation_id: getROI
+        summary: "Get return on investment report"
+        parameters:
+          - name: period
+            in: query
+            type: string
+            description: "Period identifier (e.g., '2025-W01', '2025-01')"
+        responses:
+          200:
+            description: "ROI report"
+            body:
+              report: ROIReport
+              trend:
+                efficiency_change: float
+                cost_per_task_change: float
+
+  # ---------------------------------------------------------------------------
+  # System API - Health checks and system operations
+  # ---------------------------------------------------------------------------
+  system:
+    base_path: "/system"
+
+    endpoints:
+      # Health check
+      - method: GET
+        path: "/health"
+        operation_id: healthCheck
+        summary: "System health check"
+        authentication: false  # Public endpoint
+        responses:
+          200:
+            description: "System healthy"
+            body:
+              status: healthy
+              timestamp: datetime
+              version: string
+              components:
+                redis: { status: string, latency_ms: integer }
+                rabbitmq: { status: string, latency_ms: integer }
+                vault: { status: string, latency_ms: integer }
+          503:
+            description: "System unhealthy"
+            body:
+              status: unhealthy
+              timestamp: datetime
+              issues: array[string]
+
+      # Detailed status
+      - method: GET
+        path: "/status"
+        operation_id: getStatus
+        summary: "Get detailed system status"
+        responses:
+          200:
+            description: "System status"
+            body:
+              orchestrator:
+                status: string
+                uptime_seconds: integer
+                version: string
+              agents:
+                total: integer
+                idle: integer
+                busy: integer
+                error: integer
+              queues:
+                pending_tasks: integer
+                high_priority_pending: integer
+              resources:
+                memory_usage_mb: integer
+                cpu_usage_percent: float
+
+      # Trigger intervention
+      - method: POST
+        path: "/intervention"
+        operation_id: triggerIntervention
+        summary: "Human intervention endpoint"
+        description: >
+          Used by the orchestrator to request human intervention.
+          Also allows humans to send commands back to the system.
+        request_body:
+          schema:
+            type: object
+            required: [action]
+            properties:
+              action:
+                type: string
+                enum:
+                  - approve_decision    # Approve a pending decision
+                  - reject_decision     # Reject a pending decision
+                  - provide_guidance    # Provide guidance for a blocked task
+                  - force_retry         # Force retry of a failed task
+                  - pause_agent         # Pause an agent
+                  - resume_agent        # Resume a paused agent
+              target_id:
+                type: string
+                description: "ID of the decision/task/agent being acted upon"
+              payload:
+                type: object
+                description: "Action-specific data"
+        responses:
+          200:
+            description: "Intervention processed"
+            body:
+              intervention_id: uuid
+              status: processed
+              result: object
+          400:
+            description: "Invalid intervention request"
+
+# =============================================================================
+# WebSocket API - Real-time updates
+# =============================================================================
+websocket:
+  endpoint: "/ws"
+  protocol: "wss"
+  authentication:
+    type: "query_param"
+    param_name: "token"
+    description: "Bearer token passed as query parameter"
+
+  # Connection lifecycle
+  lifecycle:
+    on_connect:
+      - Validate authentication token
+      - Register client for updates
+      - Send initial state snapshot
+    on_disconnect:
+      - Unregister client
+      - Clean up subscriptions
+    heartbeat:
+      interval_ms: 30000
+      timeout_ms: 60000
+
+  # Subscription channels
+  channels:
+    tasks:
+      description: "Subscribe to task updates"
+      subscribe_message:
+        type: subscribe
+        channel: tasks
+        filters:
+          task_id: uuid (optional, for specific task)
+          status: array[string] (optional)
+      events:
+        - task.created
+        - task.updated
+        - task.status_changed
+        - task.completed
+        - task.failed
+
+    agents:
+      description: "Subscribe to agent status updates"
+      subscribe_message:
+        type: subscribe
+        channel: agents
+        filters:
+          agent_id: string (optional)
+      events:
+        - agent.status_changed
+        - agent.task_assigned
+        - agent.task_completed
+        - agent.error
+
+    system:
+      description: "Subscribe to system-wide events"
+      subscribe_message:
+        type: subscribe
+        channel: system
+      events:
+        - system.health_changed
+        - system.intervention_required
+        - system.alert
+
+  # Event message format
+  event_format:
+    type: object
+    properties:
+      event:
+        type: string
+        description: "Event type (e.g., 'task.updated')"
+      timestamp:
+        type: string
+        format: ISO8601
+      data:
+        type: object
+        description: "Event-specific payload"
+      correlation_id:
+        type: uuid
+        description: "For tracking related events"
+
+# =============================================================================
+# Internal RPC Contracts (Agent-to-Agent via RabbitMQ)
+# =============================================================================
+internal_rpc:
+  description: >
+    Internal communication contracts between agents via RabbitMQ.
+    These are not exposed externally but define the internal protocol.
+
+  exchanges:
+    agent_tasks:
+      name: "agent.tasks"
+      type: direct
+      durable: true
+      routing_keys:
+        - "task.orchestrator"  # Messages to orchestrator
+        - "task.architect"     # Messages to architect
+        - "task.coder"         # Messages to coder
+        - "task.researcher"    # Messages to researcher
+        - "task.tester"        # Messages to tester
+        - "task.infra"         # Messages to infra
+
+    agent_events:
+      name: "agent.events"
+      type: fanout
+      durable: true
+      description: "Broadcast events to all agents"
+
+  queues:
+    - name: "tasks.default"
+      exchange: "agent.tasks"
+      routing_key: "task.*"
+      priority_support: true
+      max_priority: 10
+      arguments:
+        x-message-ttl: 86400000  # 24 hours
+        x-dead-letter-exchange: "agent.tasks.dlx"
+
+    - name: "tasks.high_priority"
+      exchange: "agent.tasks"
+      routing_key: "task.*.high"
+      priority_support: true
+      arguments:
+        x-message-ttl: 3600000  # 1 hour
+        x-max-length: 100
+
+  # RPC patterns
+  patterns:
+    request_response:
+      description: "Synchronous-style RPC over async messaging"
+      flow:
+        1: "Caller publishes message with reply_to queue"
+        2: "Callee processes and publishes response to reply_to"
+        3: "Caller consumes response with correlation_id match"
+      timeout_ms: 30000
+
+    fire_and_forget:
+      description: "Asynchronous task delegation"
+      flow:
+        1: "Publisher sends message to exchange"
+        2: "Consumer processes independently"
+        3: "Status updates via separate channel"
+
+  # Message contract (references DATA_MODELS.yaml)
+  message_schema:
+    reference: "DATA_MODELS.yaml#/messages/TaskMessage"
+
+# =============================================================================
+# Error Codes
+# =============================================================================
+error_codes:
+  # Client errors (4xx)
+  INVALID_REQUEST:
+    code: "E4000"
+    http_status: 400
+    message: "Invalid request format or parameters"
+
+  VALIDATION_FAILED:
+    code: "E4001"
+    http_status: 400
+    message: "Request validation failed"
+
+  UNAUTHORIZED:
+    code: "E4010"
+    http_status: 401
+    message: "Authentication required"
+
+  FORBIDDEN:
+    code: "E4030"
+    http_status: 403
+    message: "Insufficient permissions"
+
+  NOT_FOUND:
+    code: "E4040"
+    http_status: 404
+    message: "Resource not found"
+
+  CONFLICT:
+    code: "E4090"
+    http_status: 409
+    message: "Resource state conflict"
+
+  RATE_LIMITED:
+    code: "E4290"
+    http_status: 429
+    message: "Rate limit exceeded"
+
+  # Server errors (5xx)
+  INTERNAL_ERROR:
+    code: "E5000"
+    http_status: 500
+    message: "Internal server error"
+
+  SERVICE_UNAVAILABLE:
+    code: "E5030"
+    http_status: 503
+    message: "Service temporarily unavailable"
+
+  AGENT_ERROR:
+    code: "E5010"
+    http_status: 500
+    message: "Agent execution error"
+
+  LLM_ERROR:
+    code: "E5020"
+    http_status: 502
+    message: "LLM service error"
+
+  TIMEOUT:
+    code: "E5040"
+    http_status: 504
+    message: "Operation timeout"
+
+# =============================================================================
+# Pagination & Common Parameters
+# =============================================================================
+common:
+  pagination:
+    description: "Standard pagination parameters for list endpoints"
+    parameters:
+      limit:
+        type: integer
+        default: 50
+        min: 1
+        max: 100
+        description: "Number of items to return"
+      offset:
+        type: integer
+        default: 0
+        min: 0
+        description: "Number of items to skip"
+    response_fields:
+      total: "Total number of items matching query"
+      limit: "Items per page"
+      offset: "Current offset"
+      has_more: "Whether more items exist"
+
+  sorting:
+    description: "Standard sorting parameters"
+    parameters:
+      sort:
+        type: string
+        description: "Field to sort by"
+      order:
+        type: string
+        enum: [asc, desc]
+        default: desc
+
+  filtering:
+    description: "Date range filtering"
+    parameters:
+      since:
+        type: string
+        format: ISO8601
+        description: "Return items created/updated after this time"
+      until:
+        type: string
+        format: ISO8601
+        description: "Return items created/updated before this time"

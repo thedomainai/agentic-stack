@@ -1,14 +1,105 @@
 # Agentic Stack Architecture Specification
 
-version: 1.0
+version: 2.0
 
+# =============================================================================
+# Design Decisions
+# =============================================================================
+design:
+  language: Python
+  llm_backend: Claude API (Anthropic)
+  operation_mode: resident_with_events  # 常駐+イベント併用
+  autonomy_level: monitoring  # 全アクションをログ、問題時のみ介入
+  communication: hybrid  # 同期:直接呼び出し / 非同期:RabbitMQ
+
+# =============================================================================
+# Agent Hierarchy
+# =============================================================================
+agents:
+  orchestrator:
+    name: AgentCore
+    type: Orchestrator
+    description: >
+      The central coordinator that manages and delegates tasks to specialized
+      sub-agents. Monitors all actions, logs decisions, and intervenes only
+      when issues arise.
+    responsibilities:
+      - Task decomposition and delegation
+      - Sub-agent coordination and communication
+      - Global state management
+      - Decision logging to .ai/memory/DECISIONS.jsonl
+      - Failure detection and recovery initiation
+
+  sub_agents:
+    - name: Architect
+      type: DesignAndReview
+      description: >
+        Handles system design, code review, and ensures overall consistency
+        across the codebase.
+      capabilities:
+        - Architecture design
+        - Code review
+        - Consistency validation
+        - Technical debt assessment
+
+    - name: Coder
+      type: CodeGeneration
+      description: >
+        Generates, modifies, and refactors code based on specifications
+        provided by the Orchestrator or Architect.
+      capabilities:
+        - Code generation
+        - Bug fixing
+        - Refactoring
+        - Documentation generation
+
+    - name: Researcher
+      type: InformationGathering
+      description: >
+        Performs web searches, API documentation lookups, and gathers
+        information required for decision-making.
+      capabilities:
+        - Web search
+        - Documentation retrieval
+        - Competitive analysis
+        - Technology evaluation
+
+    - name: Tester
+      type: QualityAssurance
+      description: >
+        Executes tests, validates implementations, and ensures code quality
+        meets the defined standards.
+      capabilities:
+        - Unit test execution
+        - Integration testing
+        - Coverage analysis
+        - Performance testing
+
+    - name: Infra
+      type: InfrastructureOperations
+      description: >
+        Manages deployment, infrastructure provisioning, and operational
+        tasks such as monitoring and scaling.
+      capabilities:
+        - Deployment automation
+        - Container management
+        - Infrastructure provisioning
+        - Log aggregation
+
+# =============================================================================
+# Infrastructure Components
+# =============================================================================
 components:
   - name: AgentCore
     type: ApplicationLogic
     description: >
-      The central processing unit of the agent. Responsible for executing tasks,
-      making decisions, and interacting with other components.
-      (Implementation language TBD: e.g., Python, Go)
+      The central processing unit implementing the Orchestrator pattern.
+      Coordinates sub-agents, manages state, and interfaces with all
+      infrastructure components.
+    implementation:
+      language: Python
+      framework: asyncio
+      llm_client: anthropic (Claude API)
 
   - name: Redis
     type: InMemoryDataStore
@@ -74,3 +165,98 @@ components:
       - authentication:
           development: "Token (using the predefined dev root token)"
           production: "AppRole (recommended for automated workflows)"
+
+# =============================================================================
+# Communication Patterns
+# =============================================================================
+communication:
+  hybrid_model:
+    description: >
+      The system uses a hybrid communication model where synchronous operations
+      use direct method calls and asynchronous operations go through RabbitMQ.
+
+    synchronous:
+      use_cases:
+        - Quick sub-agent queries (< 5 seconds expected)
+        - Real-time code review feedback
+        - Validation checks
+      implementation: Direct Python method calls via asyncio
+
+    asynchronous:
+      use_cases:
+        - Long-running tasks (test execution, deployments)
+        - Background research operations
+        - Batch processing jobs
+      implementation: RabbitMQ message queues
+
+  message_format:
+    type: JSON
+    schema:
+      task_id: "uuid"
+      source_agent: "string"
+      target_agent: "string"
+      action: "string"
+      payload: "object"
+      priority: "normal | high"
+      timestamp: "ISO8601"
+      correlation_id: "uuid (for tracking related messages)"
+
+# =============================================================================
+# Data Flow
+# =============================================================================
+dataflow:
+  task_lifecycle:
+    1_receive:
+      description: "Task received from external source or internal trigger"
+      storage: "RabbitMQ queue or direct invocation"
+
+    2_decompose:
+      description: "Orchestrator analyzes and breaks down the task"
+      storage: "Redis (agent:context:{task_id})"
+      log: ".ai/memory/DECISIONS.jsonl"
+
+    3_delegate:
+      description: "Sub-tasks assigned to appropriate sub-agents"
+      communication: "Sync for quick tasks, Async for long-running"
+
+    4_execute:
+      description: "Sub-agents perform their specialized work"
+      monitoring: "All actions logged for audit"
+
+    5_aggregate:
+      description: "Orchestrator collects and validates results"
+      storage: "Redis for intermediate, FileSystem for final"
+
+    6_complete:
+      description: "Task marked complete, metrics recorded"
+      log: ".ai/metrics/VELOCITY.jsonl"
+
+  logging_strategy:
+    all_decisions: ".ai/memory/DECISIONS.jsonl"
+    all_failures: ".ai/memory/FAILURES.jsonl"
+    discoveries: ".ai/memory/DISCOVERIES.jsonl"
+    context_switches: ".ai/memory/CONTEXT_HANDOFF.jsonl"
+
+# =============================================================================
+# Monitoring & Observability
+# =============================================================================
+monitoring:
+  autonomy_level: monitoring
+  description: >
+    The system operates in monitoring mode where all actions are logged
+    and human intervention is requested only when issues arise.
+
+  intervention_triggers:
+    - Repeated failures (> 3 consecutive failures on same task type)
+    - Security-sensitive operations (secret access, external API calls)
+    - Destructive operations (file deletion, deployment rollback)
+    - Budget threshold exceeded (defined in BUDGET_TRACKER.jsonl)
+    - Unrecognized task patterns
+
+  alerts:
+    channel: "TBD (Slack, email, etc.)"
+    severity_levels:
+      - info: "Normal operation logs"
+      - warning: "Potential issues, no immediate action required"
+      - error: "Failed operations, may need investigation"
+      - critical: "Immediate human intervention required"

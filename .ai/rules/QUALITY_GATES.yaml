@@ -1,0 +1,362 @@
+# Agentic Stack Quality Gates
+# Defines quality checkpoints and validation criteria for all operations
+
+version: 1.0
+
+# =============================================================================
+# Overview
+# =============================================================================
+overview:
+  description: >
+    Quality gates are mandatory checkpoints that must pass before
+    operations can proceed. They ensure consistent quality and
+    prevent defects from propagating through the system.
+
+  enforcement: strict  # strict | advisory
+  bypass_allowed: false  # Only for emergency with audit trail
+
+# =============================================================================
+# Code Quality Gates
+# =============================================================================
+code_quality:
+
+  # ---------------------------------------------------------------------------
+  # Pre-Commit Gates
+  # ---------------------------------------------------------------------------
+  pre_commit:
+    description: "Checks before code is committed"
+    blocking: true
+
+    gates:
+      - name: syntax_check
+        description: "Verify code has no syntax errors"
+        tools: ["python -m py_compile", "tsc --noEmit"]
+        required: true
+
+      - name: linting
+        description: "Code style and common issues"
+        tools:
+          python: "ruff check"
+          typescript: "eslint"
+        required: true
+        config:
+          max_warnings: 0
+          max_errors: 0
+
+      - name: formatting
+        description: "Code formatting standards"
+        tools:
+          python: "ruff format --check"
+          typescript: "prettier --check"
+        required: true
+        auto_fix: true
+
+      - name: type_check
+        description: "Static type checking"
+        tools:
+          python: "mypy"
+          typescript: "tsc"
+        required: true
+        config:
+          strict_mode: true
+
+      - name: secret_scan
+        description: "Detect accidentally committed secrets"
+        tools: ["gitleaks", "detect-secrets"]
+        required: true
+        blocking: true
+
+  # ---------------------------------------------------------------------------
+  # Pre-Merge Gates
+  # ---------------------------------------------------------------------------
+  pre_merge:
+    description: "Checks before merging to main branch"
+    blocking: true
+
+    gates:
+      - name: unit_tests
+        description: "All unit tests must pass"
+        command: "pytest tests/unit"
+        required: true
+        config:
+          min_pass_rate: 1.0
+
+      - name: integration_tests
+        description: "Integration tests must pass"
+        command: "pytest tests/integration"
+        required: true
+        config:
+          min_pass_rate: 1.0
+
+      - name: coverage
+        description: "Code coverage requirements"
+        tool: "pytest --cov"
+        required: true
+        config:
+          min_coverage: 0.70
+          fail_under: 0.60
+          exclude_patterns:
+            - "tests/*"
+            - "*/__init__.py"
+
+      - name: dependency_audit
+        description: "Check for vulnerable dependencies"
+        tools:
+          python: "safety check"
+          npm: "npm audit"
+        required: true
+        config:
+          max_critical: 0
+          max_high: 0
+
+      - name: documentation
+        description: "Required documentation present"
+        required: false  # Advisory
+        checks:
+          - "Public functions have docstrings"
+          - "README updated for new features"
+          - "CHANGELOG entry added"
+
+  # ---------------------------------------------------------------------------
+  # Pre-Deploy Gates
+  # ---------------------------------------------------------------------------
+  pre_deploy:
+    description: "Checks before deployment"
+    blocking: true
+
+    gates:
+      - name: all_tests_pass
+        description: "Full test suite must pass"
+        required: true
+
+      - name: performance_baseline
+        description: "No performance regression"
+        required: true
+        config:
+          max_regression_percent: 10
+
+      - name: security_scan
+        description: "Security vulnerability scan"
+        tools: ["bandit", "semgrep"]
+        required: true
+        config:
+          max_critical: 0
+          max_high: 0
+
+      - name: build_success
+        description: "Production build completes"
+        required: true
+
+      - name: rollback_plan
+        description: "Rollback procedure documented"
+        required: true
+
+# =============================================================================
+# Task Quality Gates
+# =============================================================================
+task_quality:
+
+  # ---------------------------------------------------------------------------
+  # Task Completion Gates
+  # ---------------------------------------------------------------------------
+  completion:
+    description: "Criteria for marking a task complete"
+
+    gates:
+      - name: acceptance_criteria_met
+        description: "All acceptance criteria satisfied"
+        required: true
+        validation: "manual_or_automated"
+
+      - name: tests_written
+        description: "Tests cover new/modified code"
+        required: true
+        config:
+          require_for: ["feature", "bugfix"]
+          exclude: ["documentation", "config"]
+
+      - name: no_regressions
+        description: "Existing tests still pass"
+        required: true
+
+      - name: code_reviewed
+        description: "Code has been reviewed"
+        required: true
+        config:
+          min_reviewers: 1
+          allow_self_review: false
+          agent_review_counts: true
+
+      - name: documentation_updated
+        description: "Relevant docs updated"
+        required: false
+        config:
+          require_for: ["feature", "breaking_change"]
+
+  # ---------------------------------------------------------------------------
+  # Task Handoff Gates
+  # ---------------------------------------------------------------------------
+  handoff:
+    description: "Criteria for handing off between agents"
+
+    gates:
+      - name: context_documented
+        description: "Handoff context is complete"
+        required: true
+        fields:
+          - "current_status"
+          - "completed_work"
+          - "pending_items"
+          - "blockers"
+
+      - name: artifacts_accessible
+        description: "All artifacts are accessible"
+        required: true
+
+      - name: no_active_locks
+        description: "No resource locks held"
+        required: true
+
+# =============================================================================
+# Data Quality Gates
+# =============================================================================
+data_quality:
+
+  # ---------------------------------------------------------------------------
+  # Input Validation
+  # ---------------------------------------------------------------------------
+  input_validation:
+    description: "Validate all input data"
+
+    gates:
+      - name: schema_validation
+        description: "Input matches expected schema"
+        required: true
+        action_on_fail: reject
+
+      - name: sanitization
+        description: "Input is sanitized"
+        required: true
+        checks:
+          - "No SQL injection patterns"
+          - "No XSS patterns"
+          - "No path traversal"
+
+      - name: size_limits
+        description: "Input within size limits"
+        required: true
+        config:
+          max_request_size_kb: 1024
+          max_field_length: 10000
+
+  # ---------------------------------------------------------------------------
+  # Output Validation
+  # ---------------------------------------------------------------------------
+  output_validation:
+    description: "Validate all output data"
+
+    gates:
+      - name: schema_compliance
+        description: "Output matches defined schema"
+        required: true
+
+      - name: no_sensitive_data
+        description: "No secrets in output"
+        required: true
+        patterns_to_block:
+          - "password"
+          - "secret"
+          - "api_key"
+          - "token"
+          - "private_key"
+
+      - name: response_size
+        description: "Response within limits"
+        required: true
+        config:
+          max_response_size_kb: 5120
+
+# =============================================================================
+# Agent Quality Gates
+# =============================================================================
+agent_quality:
+
+  # ---------------------------------------------------------------------------
+  # Agent Health
+  # ---------------------------------------------------------------------------
+  health:
+    description: "Agent health requirements"
+
+    gates:
+      - name: heartbeat_active
+        description: "Agent responding to heartbeats"
+        required: true
+        config:
+          max_missed: 3
+          interval_ms: 60000
+
+      - name: error_rate_acceptable
+        description: "Error rate within limits"
+        required: true
+        config:
+          max_error_rate: 0.1
+          window_minutes: 60
+
+      - name: resource_usage_normal
+        description: "Resource usage within bounds"
+        required: true
+        config:
+          max_memory_mb: 2048
+          max_cpu_percent: 80
+
+  # ---------------------------------------------------------------------------
+  # Agent Output Quality
+  # ---------------------------------------------------------------------------
+  output_quality:
+    description: "Quality of agent outputs"
+
+    gates:
+      - name: response_coherent
+        description: "Response is coherent and relevant"
+        validation: "llm_based"
+        required: true
+
+      - name: code_executable
+        description: "Generated code is executable"
+        required: true
+        for_agents: ["Coder"]
+
+      - name: no_hallucinations
+        description: "No fabricated information"
+        validation: "cross_reference"
+        required: true
+        for_agents: ["Researcher"]
+
+# =============================================================================
+# Metrics & Reporting
+# =============================================================================
+metrics:
+
+  track:
+    - "gate_pass_rate_by_type"
+    - "gate_failure_reasons"
+    - "time_to_pass_gates"
+    - "bypass_requests"
+    - "quality_trend_over_time"
+
+  alerts:
+    - condition: "gate_pass_rate < 0.8"
+      severity: warning
+      message: "Quality gate pass rate declining"
+
+    - condition: "critical_gate_bypass"
+      severity: critical
+      message: "Critical quality gate bypassed"
+
+  reporting:
+    frequency: daily
+    include:
+      - "Pass/fail summary"
+      - "Common failure reasons"
+      - "Trend analysis"
+      - "Recommendations"

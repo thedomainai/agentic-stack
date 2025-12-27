@@ -1,0 +1,689 @@
+# Agentic Stack Data Models Specification
+# Defines all entities, message schemas, and data structures used across the system
+
+version: 1.0
+
+# =============================================================================
+# Core Entities
+# =============================================================================
+entities:
+
+  # ---------------------------------------------------------------------------
+  # Task - The fundamental unit of work in the system
+  # ---------------------------------------------------------------------------
+  Task:
+    description: >
+      Represents a unit of work that can be processed by the orchestrator
+      or delegated to sub-agents.
+    fields:
+      task_id:
+        type: uuid
+        required: true
+        description: "Unique identifier for the task"
+      parent_task_id:
+        type: uuid
+        required: false
+        description: "Reference to parent task if this is a sub-task"
+      title:
+        type: string
+        max_length: 200
+        required: true
+        description: "Human-readable title of the task"
+      description:
+        type: string
+        required: false
+        description: "Detailed description of what needs to be done"
+      status:
+        type: enum
+        values: [pending, queued, in_progress, blocked, completed, failed, cancelled]
+        default: pending
+        required: true
+      priority:
+        type: enum
+        values: [low, normal, high, critical]
+        default: normal
+        required: true
+      assigned_agent:
+        type: string
+        required: false
+        description: "Name of the sub-agent assigned to this task"
+        enum: [Architect, Coder, Researcher, Tester, Infra]
+      created_at:
+        type: datetime
+        format: ISO8601
+        required: true
+      updated_at:
+        type: datetime
+        format: ISO8601
+        required: true
+      started_at:
+        type: datetime
+        format: ISO8601
+        required: false
+      completed_at:
+        type: datetime
+        format: ISO8601
+        required: false
+      deadline:
+        type: datetime
+        format: ISO8601
+        required: false
+      tags:
+        type: array
+        items: string
+        required: false
+      metadata:
+        type: object
+        required: false
+        description: "Arbitrary key-value pairs for extensibility"
+    indexes:
+      - [status, priority]
+      - [assigned_agent, status]
+      - [parent_task_id]
+
+  # ---------------------------------------------------------------------------
+  # Agent - Represents an agent instance in the system
+  # ---------------------------------------------------------------------------
+  Agent:
+    description: >
+      Represents an agent (orchestrator or sub-agent) in the system.
+    fields:
+      agent_id:
+        type: string
+        required: true
+        description: "Unique identifier (e.g., 'orchestrator', 'coder-01')"
+      agent_type:
+        type: enum
+        values: [Orchestrator, Architect, Coder, Researcher, Tester, Infra]
+        required: true
+      status:
+        type: enum
+        values: [idle, busy, error, offline, maintenance]
+        default: idle
+        required: true
+      current_task_id:
+        type: uuid
+        required: false
+        description: "Currently executing task, if any"
+      capabilities:
+        type: array
+        items: string
+        required: true
+        description: "List of capabilities this agent provides"
+      started_at:
+        type: datetime
+        format: ISO8601
+        required: true
+      last_heartbeat:
+        type: datetime
+        format: ISO8601
+        required: true
+      metrics:
+        type: object
+        required: false
+        properties:
+          tasks_completed: integer
+          tasks_failed: integer
+          average_duration_ms: integer
+
+# =============================================================================
+# Message Schemas (for RabbitMQ / Inter-agent Communication)
+# =============================================================================
+messages:
+
+  # ---------------------------------------------------------------------------
+  # TaskMessage - Standard message format for task delegation
+  # ---------------------------------------------------------------------------
+  TaskMessage:
+    description: >
+      Message format for delegating tasks between agents via RabbitMQ
+      or direct invocation.
+    fields:
+      message_id:
+        type: uuid
+        required: true
+        description: "Unique identifier for this message"
+      correlation_id:
+        type: uuid
+        required: true
+        description: "ID to track related messages in a workflow"
+      task_id:
+        type: uuid
+        required: true
+        description: "Reference to the task being communicated about"
+      source_agent:
+        type: string
+        required: true
+        description: "Agent that sent this message"
+      target_agent:
+        type: string
+        required: true
+        description: "Intended recipient agent"
+      action:
+        type: enum
+        values:
+          - task.assign      # Orchestrator assigns task to sub-agent
+          - task.start       # Sub-agent acknowledges and starts work
+          - task.progress    # Progress update during execution
+          - task.complete    # Task completed successfully
+          - task.fail        # Task failed with error
+          - task.cancel      # Request to cancel task
+          - task.query       # Request for task status
+        required: true
+      payload:
+        type: object
+        required: true
+        description: "Action-specific data"
+      priority:
+        type: enum
+        values: [normal, high]
+        default: normal
+        required: true
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      ttl_ms:
+        type: integer
+        required: false
+        description: "Time-to-live in milliseconds (optional expiry)"
+
+  # ---------------------------------------------------------------------------
+  # TaskResultPayload - Payload structure for task completion
+  # ---------------------------------------------------------------------------
+  TaskResultPayload:
+    description: >
+      Payload included in task.complete or task.fail messages.
+    fields:
+      success:
+        type: boolean
+        required: true
+      result:
+        type: object
+        required: false
+        description: "Output data from successful task execution"
+      error:
+        type: object
+        required: false
+        properties:
+          code:
+            type: string
+            description: "Error code for categorization"
+          message:
+            type: string
+            description: "Human-readable error message"
+          stack_trace:
+            type: string
+            required: false
+          recoverable:
+            type: boolean
+            default: false
+      duration_ms:
+        type: integer
+        required: true
+        description: "Time taken to execute the task"
+      artifacts:
+        type: array
+        required: false
+        items:
+          type: object
+          properties:
+            name: string
+            path: string
+            type: string  # file, url, reference
+
+# =============================================================================
+# Memory Schemas (for JSONL files in .ai/memory/)
+# =============================================================================
+memory:
+
+  # ---------------------------------------------------------------------------
+  # DecisionLog - Records decisions made by agents
+  # ---------------------------------------------------------------------------
+  DecisionLog:
+    file: ".ai/memory/DECISIONS.jsonl"
+    description: >
+      Records all significant decisions made by the orchestrator and sub-agents.
+      Each line is a JSON object representing one decision.
+    fields:
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      decision_id:
+        type: uuid
+        required: true
+      agent:
+        type: string
+        required: true
+        description: "Agent that made the decision"
+      task_id:
+        type: uuid
+        required: false
+        description: "Related task, if applicable"
+      decision_type:
+        type: enum
+        values:
+          - task_delegation     # Which agent to assign a task to
+          - approach_selection  # Choosing between implementation approaches
+          - error_handling      # How to handle an error
+          - resource_allocation # Allocating resources/budget
+          - intervention_request # Requesting human intervention
+        required: true
+      context:
+        type: string
+        required: true
+        description: "Situation that led to this decision"
+      options_considered:
+        type: array
+        items:
+          type: object
+          properties:
+            option: string
+            pros: array
+            cons: array
+        required: false
+      chosen_option:
+        type: string
+        required: true
+        description: "The option that was selected"
+      rationale:
+        type: string
+        required: true
+        description: "Why this option was chosen"
+      confidence:
+        type: float
+        min: 0.0
+        max: 1.0
+        required: false
+        description: "Confidence level in this decision (0-1)"
+      outcome:
+        type: enum
+        values: [pending, success, partial, failure, unknown]
+        default: pending
+        required: true
+
+  # ---------------------------------------------------------------------------
+  # FailureLog - Records failures and errors
+  # ---------------------------------------------------------------------------
+  FailureLog:
+    file: ".ai/memory/FAILURES.jsonl"
+    description: >
+      Records all failures, errors, and exceptions for post-mortem analysis
+      and pattern detection.
+    fields:
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      failure_id:
+        type: uuid
+        required: true
+      agent:
+        type: string
+        required: true
+      task_id:
+        type: uuid
+        required: false
+      severity:
+        type: enum
+        values: [warning, error, critical]
+        required: true
+      category:
+        type: enum
+        values:
+          - llm_error         # LLM API failures
+          - execution_error   # Code execution failures
+          - timeout           # Operation timeouts
+          - validation_error  # Input/output validation failures
+          - resource_error    # Resource exhaustion (memory, disk, etc.)
+          - external_error    # External service failures
+          - logic_error       # Unexpected logical errors
+        required: true
+      error_code:
+        type: string
+        required: false
+      message:
+        type: string
+        required: true
+      stack_trace:
+        type: string
+        required: false
+      context:
+        type: object
+        required: false
+        description: "Additional context at time of failure"
+      recovery_action:
+        type: string
+        required: false
+        description: "Action taken to recover, if any"
+      resolved:
+        type: boolean
+        default: false
+        required: true
+
+  # ---------------------------------------------------------------------------
+  # DiscoveryLog - Records learnings and discoveries
+  # ---------------------------------------------------------------------------
+  DiscoveryLog:
+    file: ".ai/memory/DISCOVERIES.jsonl"
+    description: >
+      Records insights, patterns, and learnings discovered during operation
+      that may be useful for future tasks.
+    fields:
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      discovery_id:
+        type: uuid
+        required: true
+      agent:
+        type: string
+        required: true
+      task_id:
+        type: uuid
+        required: false
+      category:
+        type: enum
+        values:
+          - codebase_pattern   # Patterns found in the codebase
+          - best_practice      # Effective approaches discovered
+          - anti_pattern       # Things to avoid
+          - dependency_info    # Information about dependencies
+          - performance_insight # Performance-related discoveries
+          - domain_knowledge   # Domain-specific learnings
+        required: true
+      title:
+        type: string
+        max_length: 200
+        required: true
+      description:
+        type: string
+        required: true
+      evidence:
+        type: array
+        items: string
+        required: false
+        description: "File paths or references supporting this discovery"
+      confidence:
+        type: float
+        min: 0.0
+        max: 1.0
+        required: false
+      tags:
+        type: array
+        items: string
+        required: false
+
+  # ---------------------------------------------------------------------------
+  # ContextHandoff - Records context transfers between sessions
+  # ---------------------------------------------------------------------------
+  ContextHandoff:
+    file: ".ai/memory/CONTEXT_HANDOFF.jsonl"
+    description: >
+      Records context information when handing off between sessions or agents
+      to maintain continuity.
+    fields:
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      handoff_id:
+        type: uuid
+        required: true
+      from_agent:
+        type: string
+        required: true
+      to_agent:
+        type: string
+        required: false
+        description: "null if handoff is to next session"
+      reason:
+        type: enum
+        values:
+          - session_end       # Normal session termination
+          - task_delegation   # Handing to another agent
+          - error_recovery    # Recovery after failure
+          - timeout           # Forced handoff due to timeout
+        required: true
+      active_tasks:
+        type: array
+        items:
+          type: object
+          properties:
+            task_id: uuid
+            status: string
+            progress_summary: string
+        required: true
+      pending_decisions:
+        type: array
+        items: string
+        required: false
+        description: "Decisions awaiting resolution"
+      important_context:
+        type: string
+        required: true
+        description: "Summary of crucial context for continuity"
+      files_modified:
+        type: array
+        items: string
+        required: false
+        description: "List of files modified in this session"
+
+# =============================================================================
+# Metrics Schemas (for JSONL files in .ai/metrics/)
+# =============================================================================
+metrics:
+
+  # ---------------------------------------------------------------------------
+  # VelocityMetric - Task completion velocity tracking
+  # ---------------------------------------------------------------------------
+  VelocityMetric:
+    file: ".ai/metrics/VELOCITY.jsonl"
+    description: >
+      Tracks task completion rates and processing times for performance analysis.
+    fields:
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      period:
+        type: enum
+        values: [hourly, daily, weekly]
+        required: true
+      period_start:
+        type: datetime
+        format: ISO8601
+        required: true
+      period_end:
+        type: datetime
+        format: ISO8601
+        required: true
+      tasks_completed:
+        type: integer
+        required: true
+      tasks_failed:
+        type: integer
+        required: true
+      tasks_cancelled:
+        type: integer
+        required: true
+      average_duration_ms:
+        type: integer
+        required: true
+      p50_duration_ms:
+        type: integer
+        required: false
+      p95_duration_ms:
+        type: integer
+        required: false
+      by_agent:
+        type: object
+        required: false
+        description: "Breakdown by agent type"
+      by_priority:
+        type: object
+        required: false
+        description: "Breakdown by priority level"
+
+  # ---------------------------------------------------------------------------
+  # BudgetTracker - Resource and cost tracking
+  # ---------------------------------------------------------------------------
+  BudgetTracker:
+    file: ".ai/metrics/BUDGET_TRACKER.jsonl"
+    description: >
+      Tracks resource consumption and costs for budget management.
+    fields:
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      period:
+        type: enum
+        values: [daily, weekly, monthly]
+        required: true
+      period_start:
+        type: datetime
+        format: ISO8601
+        required: true
+      llm_usage:
+        type: object
+        required: true
+        properties:
+          input_tokens:
+            type: integer
+          output_tokens:
+            type: integer
+          total_cost_usd:
+            type: float
+          by_model:
+            type: object
+            description: "Token usage breakdown by model"
+      api_calls:
+        type: object
+        required: false
+        properties:
+          total_calls:
+            type: integer
+          by_service:
+            type: object
+      compute_time_minutes:
+        type: float
+        required: false
+      budget_limit_usd:
+        type: float
+        required: false
+      budget_remaining_usd:
+        type: float
+        required: false
+      alerts:
+        type: array
+        items: string
+        required: false
+        description: "Budget-related warnings"
+
+  # ---------------------------------------------------------------------------
+  # ROIReport - Return on investment tracking
+  # ---------------------------------------------------------------------------
+  ROIReport:
+    file: ".ai/metrics/ROI_REPORT.jsonl"
+    description: >
+      Tracks value delivered versus costs for ROI analysis.
+    fields:
+      timestamp:
+        type: datetime
+        format: ISO8601
+        required: true
+      report_period:
+        type: string
+        required: true
+        description: "e.g., '2025-W01' or '2025-01'"
+      tasks_summary:
+        type: object
+        required: true
+        properties:
+          total_tasks: integer
+          successful_tasks: integer
+          automation_rate: float  # % of tasks completed without intervention
+      value_metrics:
+        type: object
+        required: false
+        properties:
+          estimated_hours_saved: float
+          code_lines_generated: integer
+          bugs_fixed: integer
+          tests_created: integer
+      cost_metrics:
+        type: object
+        required: true
+        properties:
+          total_cost_usd: float
+          cost_per_task_usd: float
+      efficiency_score:
+        type: float
+        required: false
+        description: "Composite efficiency metric (0-100)"
+      notes:
+        type: string
+        required: false
+
+# =============================================================================
+# Redis Key Schemas (for in-memory state)
+# =============================================================================
+redis:
+
+  agent_status:
+    key_pattern: "agent:status"
+    type: Hash
+    description: "Current operational status of each agent"
+    fields:
+      orchestrator:
+        type: string
+        values: [idle, busy, error, offline]
+      architect:
+        type: string
+      coder:
+        type: string
+      researcher:
+        type: string
+      tester:
+        type: string
+      infra:
+        type: string
+    ttl: null  # No expiry
+
+  task_context:
+    key_pattern: "agent:context:{task_id}"
+    type: String (JSON)
+    description: "Short-term context for an active task"
+    fields:
+      task_id: uuid
+      assigned_agent: string
+      started_at: datetime
+      last_update: datetime
+      progress_percentage: integer
+      current_step: string
+      intermediate_results: object
+    ttl: 86400  # 24 hours
+
+  task_queue_stats:
+    key_pattern: "queue:stats"
+    type: Hash
+    description: "Real-time queue statistics"
+    fields:
+      pending_count: integer
+      in_progress_count: integer
+      completed_today: integer
+      failed_today: integer
+    ttl: null
+
+  agent_locks:
+    key_pattern: "lock:agent:{agent_id}"
+    type: String
+    description: "Distributed lock for agent operations"
+    fields:
+      locked_by: string
+      locked_at: datetime
+      task_id: uuid
+    ttl: 300  # 5 minutes (auto-release)

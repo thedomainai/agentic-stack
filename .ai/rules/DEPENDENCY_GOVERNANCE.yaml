@@ -1,0 +1,382 @@
+# Agentic Stack Dependency Governance
+# Defines policies for managing project dependencies
+
+version: 1.0
+
+# =============================================================================
+# Overview
+# =============================================================================
+overview:
+  description: >
+    This document defines the policies and procedures for managing
+    dependencies in the Agentic Stack project, ensuring security,
+    stability, and maintainability.
+
+  goals:
+    - "Minimize security vulnerabilities from dependencies"
+    - "Ensure dependency stability and compatibility"
+    - "Control dependency bloat"
+    - "Maintain reproducible builds"
+
+# =============================================================================
+# Dependency Categories
+# =============================================================================
+categories:
+
+  production:
+    description: "Dependencies required for production runtime"
+    scrutiny_level: high
+    requirements:
+      - "Must be actively maintained"
+      - "Must have no critical vulnerabilities"
+      - "Must have stable API"
+
+  development:
+    description: "Dependencies for development only"
+    scrutiny_level: medium
+    requirements:
+      - "Should be actively maintained"
+      - "No critical vulnerabilities"
+
+  testing:
+    description: "Dependencies for testing only"
+    scrutiny_level: medium
+    requirements:
+      - "Should be actively maintained"
+      - "No critical vulnerabilities"
+
+  optional:
+    description: "Optional feature dependencies"
+    scrutiny_level: low
+    requirements:
+      - "Document when required"
+      - "Graceful degradation when absent"
+
+# =============================================================================
+# Version Policies
+# =============================================================================
+versioning:
+
+  # ---------------------------------------------------------------------------
+  # Pinning Strategy
+  # ---------------------------------------------------------------------------
+  pinning:
+    description: "How versions should be specified"
+
+    production:
+      strategy: exact
+      format: "package==1.2.3"
+      rationale: "Maximum reproducibility"
+
+    development:
+      strategy: compatible
+      format: "package~=1.2.0"
+      rationale: "Allow patch updates"
+
+    lock_file:
+      required: true
+      files:
+        python: ["requirements.lock", "poetry.lock"]
+        node: ["package-lock.json", "yarn.lock"]
+
+  # ---------------------------------------------------------------------------
+  # Update Policies
+  # ---------------------------------------------------------------------------
+  updates:
+    description: "When and how to update dependencies"
+
+    automatic:
+      allowed:
+        - "Patch versions with passing tests"
+        - "Security patches"
+
+      not_allowed:
+        - "Major version updates"
+        - "Breaking changes"
+
+    scheduled:
+      frequency: weekly
+      day: monday
+      action: "Review available updates"
+
+    security:
+      frequency: daily
+      action: "Check for security advisories"
+      auto_patch: true
+      auto_patch_scope: "patch_versions_only"
+
+# =============================================================================
+# Evaluation Criteria
+# =============================================================================
+evaluation:
+
+  # ---------------------------------------------------------------------------
+  # Required Criteria
+  # ---------------------------------------------------------------------------
+  required:
+    description: "Criteria that must be met for any dependency"
+
+    maintenance:
+      last_release_max_age: "12 months"
+      last_commit_max_age: "6 months"
+      exceptions:
+        - "Stable, mature projects with no needed updates"
+        - "Documented in exceptions list"
+
+    security:
+      no_critical_vulnerabilities: true
+      no_high_vulnerabilities: true
+      vulnerability_database: ["CVE", "GHSA", "OSV"]
+
+    license:
+      must_be_approved: true
+      reference: "OSS_GOVERNANCE.yaml"
+
+  # ---------------------------------------------------------------------------
+  # Preferred Criteria
+  # ---------------------------------------------------------------------------
+  preferred:
+    description: "Criteria that should be considered"
+
+    quality_indicators:
+      - name: "Test coverage"
+        preferred: "> 80%"
+        weight: 0.2
+
+      - name: "Documentation"
+        preferred: "Comprehensive"
+        weight: 0.2
+
+      - name: "Community size"
+        preferred: "> 1000 GitHub stars"
+        weight: 0.1
+
+      - name: "Issue response time"
+        preferred: "< 7 days median"
+        weight: 0.2
+
+      - name: "Release frequency"
+        preferred: "Regular releases"
+        weight: 0.1
+
+      - name: "Breaking change frequency"
+        preferred: "Rare"
+        weight: 0.2
+
+  # ---------------------------------------------------------------------------
+  # Risk Factors
+  # ---------------------------------------------------------------------------
+  risk_factors:
+    description: "Factors that increase risk score"
+
+    high_risk:
+      - "Single maintainer project"
+      - "No test suite"
+      - "Frequent breaking changes"
+      - "Abandoned (no updates > 2 years)"
+
+    medium_risk:
+      - "Small community"
+      - "Sparse documentation"
+      - "Infrequent releases"
+
+    low_risk:
+      - "Minor version instability"
+      - "Limited platform support"
+
+# =============================================================================
+# Dependency Addition Process
+# =============================================================================
+addition_process:
+
+  steps:
+    1:
+      name: "Justify need"
+      required: true
+      questions:
+        - "Can this be implemented without a new dependency?"
+        - "Is there an existing dependency that provides this?"
+        - "Is the functionality essential?"
+
+    2:
+      name: "Research alternatives"
+      required: true
+      minimum_alternatives: 2
+      compare:
+        - "Maintenance status"
+        - "Security history"
+        - "API design"
+        - "Size/performance"
+
+    3:
+      name: "Evaluate criteria"
+      required: true
+      check: "evaluation.required"
+
+    4:
+      name: "Test integration"
+      required: true
+      actions:
+        - "Add to development environment"
+        - "Verify compatibility"
+        - "Run test suite"
+        - "Check for conflicts"
+
+    5:
+      name: "Document decision"
+      required: true
+      location: ".ai/memory/DECISIONS.jsonl"
+      include:
+        - "Justification"
+        - "Alternatives considered"
+        - "Risk assessment"
+
+    6:
+      name: "Update manifests"
+      required: true
+      files:
+        - "requirements.txt / pyproject.toml"
+        - "Lock file"
+        - "THIRD_PARTY_LICENSES.md"
+
+# =============================================================================
+# Dependency Removal Process
+# =============================================================================
+removal_process:
+
+  triggers:
+    - "Dependency no longer used"
+    - "Better alternative available"
+    - "Security concerns"
+    - "Maintenance abandoned"
+    - "License change"
+
+  steps:
+    1:
+      name: "Identify usage"
+      action: "Find all usages of the dependency"
+
+    2:
+      name: "Plan migration"
+      action: "Create migration plan if replacement needed"
+
+    3:
+      name: "Remove usages"
+      action: "Update code to remove dependency"
+
+    4:
+      name: "Update manifests"
+      action: "Remove from requirements/lock files"
+
+    5:
+      name: "Verify removal"
+      action: "Ensure tests pass, no runtime errors"
+
+    6:
+      name: "Document"
+      action: "Record removal in decisions log"
+
+# =============================================================================
+# Monitoring & Auditing
+# =============================================================================
+monitoring:
+
+  # ---------------------------------------------------------------------------
+  # Automated Scans
+  # ---------------------------------------------------------------------------
+  automated_scans:
+    vulnerability_scan:
+      frequency: daily
+      tools:
+        python: ["safety", "pip-audit"]
+        node: ["npm audit", "snyk"]
+      action_on_finding:
+        critical: "block_and_alert"
+        high: "alert"
+        medium: "log"
+        low: "log"
+
+    outdated_scan:
+      frequency: weekly
+      tools:
+        python: ["pip list --outdated"]
+        node: ["npm outdated"]
+      report_to: ".ai/metrics/dependency_health.jsonl"
+
+    license_scan:
+      frequency: on_change
+      tools: ["license-checker", "pip-licenses"]
+      action_on_violation: "block_merge"
+
+  # ---------------------------------------------------------------------------
+  # Health Metrics
+  # ---------------------------------------------------------------------------
+  health_metrics:
+    track:
+      - "total_dependency_count"
+      - "direct_dependency_count"
+      - "transitive_dependency_count"
+      - "outdated_dependency_count"
+      - "vulnerable_dependency_count"
+      - "average_dependency_age"
+      - "dependency_update_frequency"
+
+    thresholds:
+      max_total_dependencies: 100
+      max_outdated_percent: 20
+      max_average_age_days: 180
+
+    alerts:
+      - condition: "total_dependencies > threshold"
+        action: "review_and_reduce"
+      - condition: "outdated_percent > threshold"
+        action: "schedule_updates"
+
+# =============================================================================
+# Transitive Dependencies
+# =============================================================================
+transitive:
+
+  policy:
+    description: "How to handle dependencies of dependencies"
+
+    visibility:
+      require_lock_file: true
+      track_full_tree: true
+
+    security:
+      scan_transitives: true
+      same_standards_as_direct: true
+
+    control:
+      allow_override: true
+      document_overrides: true
+      override_reasons:
+        - "Security vulnerability in transitive"
+        - "Version conflict resolution"
+
+# =============================================================================
+# Emergency Procedures
+# =============================================================================
+emergency:
+
+  critical_vulnerability:
+    steps:
+      1: "Assess impact and exploitability"
+      2: "Check for available patch"
+      3: "Apply patch or remove dependency"
+      4: "Deploy fix immediately"
+      5: "Document incident"
+
+    timeline:
+      assessment: "< 4 hours"
+      fix_applied: "< 24 hours"
+
+  supply_chain_compromise:
+    steps:
+      1: "Freeze all dependency updates"
+      2: "Identify affected versions"
+      3: "Pin to known-good version"
+      4: "Audit for compromise indicators"
+      5: "Report to security team"
+      6: "Document and review"
